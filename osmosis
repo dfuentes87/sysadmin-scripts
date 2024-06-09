@@ -1,0 +1,1867 @@
+#!/bin/bash
+#FileName: osmosis
+#NiceFileName: Osmosis
+#FileDescription: This is our migration script with headless modifications
+#AllowShared
+#set -x
+
+_script="$(pwd)/$(basename $0)";
+
+function setVars(){
+
+	# Check if _username is set
+
+	if [[ ${_listdoms} == true && -z "${_username}" ]]; then
+		_username=$(pwd | cut -d/ -f3);
+		if [[ $(getent passwd ${_username} | awk -F: '{print $6}') ]]; then
+			_home=$(getent passwd ${_username} | awk -F: '{print $6}');
+		else
+			echo -e "\nPlease make sure you are below a valid user's home directory (e.g. /home/user/...) on the file system.";
+			exit;
+		fi
+	elif [[ ${_listdoms} == true && -n "${_username}" ]]; then
+		if [[ $(getent passwd ${_username} | awk -F: '{print $6}') ]]; then
+			_home=$(getent passwd ${_username} | awk -F: '{print $6}');
+		else
+			echo -e "\nPlease enter in a valid username.";
+			exit;
+		fi
+	else
+		case $panel in
+			cpanel ) _username=$(pwd | cut -d/ -f3);;
+			plesk ) _workingdir=$(pwd)
+				if [[ "$_workingdir" == *"/var/www/vhosts/"* ]]; then
+					_username=$(MYSQL_PWD=`cat /etc/psa/.psa.shadow` mysql -ss -u admin -Dpsa -e"select sys_users.login from psa.hosting left join psa.sys_users on (hosting.sys_user_id = sys_users.id) where www_root like '${_workingdir}%' Limit 1;")
+				else
+					echo "Not in a safe directory, Please change to the users subscription directory and try again. We will call this Juans Law"
+					exit
+				fi;;
+			grid ) _workingdir=$(pwd)
+				_username=$(stat -c %U .);;
+			* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+		esac
+
+		# Check to see if the user exists.
+		if [[ ! $(getent passwd ${_username} | awk -F: '{print $6}') ]]; then
+			echo -e "\nThere is no user ${_username} listed on this system.\n";
+			echo -e "Please check the details in the migraton form and verify that they are correct.";
+			exit;
+		fi
+	fi
+
+	# Make sure we have a username set
+	if [[ -z $_username ]]; then
+		echo -e "\nFATAL ERROR! You are running $0 from `pwd`."
+		echo "Please change directories to the destination homedir (/home/user/) and try again."
+		exit
+	fi
+
+	case $panel in
+		cpanel ) _home=$(getent passwd ${_username} | awk -F: '{print $6}');;
+		plesk ) _home=$(getent passwd ${_username} | awk -F: '{print $6}');;
+		grid ) _home=$(pwd | cut -d"/" -f1-7);;
+		* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+	esac
+
+	_ct_dir="${_home}/_CloudTech";
+
+	case $panel in
+		cpanel ) _dom_dir=$(cd "${_full_src_path}"; pwd | cut -d/ -f5);;
+		plesk ) _dom_dir=$(cd "${_full_src_path}"; pwd | cut -d/ -f5);;
+		grid ) _dom_dir=$(cd "${_full_src_path}"; pwd | cut -d/ -f9);;
+		* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+	esac
+	case $panel in
+		cpanel ) _host_ip="$(cat /var/cpanel/users/${_username} | grep 'IP=' | cut -d'=' -f'2')";;
+		plesk ) _host_ip=$(MYSQL_PWD=`cat /etc/psa/.psa.shadow` mysql -ss -u admin -Dpsa -e"SELECT iad.ip_address FROM domains dom LEFT JOIN DomainServices d ON (dom.id=d.dom_id AND d.type='web') LEFT JOIN IpAddressesCollections ia ON ia.ipCollectionId=d.ipCollectionId LEFT JOIN IP_Addresses iad ON iad.id=ia.ipAddressId where dom.name=\"${_destination_domain}\"");;
+		grid ) _host_ip=$(wget http://ipinfo.io/ip -qO - );;
+		* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+	esac
+	_tmp_dir="${_ct_dir}/${_dom_dir}/tmp_dir/";
+	_migration_log="${_ct_dir}/${_dom_dir}/${_dom_dir}_migration.log";
+	touch ${_migration_log}
+
+	if [[ ${_listdoms} != true && -z ${_source_domain} ]]; then
+		_source_domain="${_dom_dir}"
+		echo
+		echo "Source domain was not set, setting to ${_source_domain}."
+	elif [[ ${_listdoms} != true && ${_source_domain} ]]; then
+		echo
+		echo "Source domain was already set to ${_source_domain}."
+	fi
+	if [[ ${_listdoms} != true && -z ${_destination_domain} ]]; then
+		case $panel in
+			cpanel ) _destination_domain="$(grep -Fxrl "documentroot: ${_full_dest_path}" /var/cpanel/userdata/${_username}/ | xargs grep "serveralias"| sed 's/mail[^ ]*//g' | awk '{print $2}' | sed s/www.//g | head -1)";;
+			plesk ) _destination_domain=$(MYSQL_PWD=`cat /etc/psa/.psa.shadow` mysql -ss -u admin -Dpsa -e"SELECT d.name FROM hosting LEFT JOIN domains d ON (hosting.dom_id=d.id) where hosting.www_root='${_full_dest_path}'");
+							_destination_primary_domain=$(MYSQL_PWD=`cat /etc/psa/.psa.shadow` mysql -ss -u admin -Dpsa -e"select host2.name from domains host1 left join domains host2 on (host1.parentDomainId = host2.id) where host1.name='${_destination_domain}';");;
+			grid ) _destination_domain=$(echo "${_full_dest_path}" | awk -F/ '{print $7}');;
+			* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+		esac
+		echo "Destination domain was not set, setting to ${_destination_domain}."
+	elif [[ ${_listdoms} != true && ${_destination_domain} ]]; then
+		echo "Destination domain was already set to ${_destination_domain}."
+	fi
+	_live__src_ip="$(dig +short ${_source_domain})"
+	_live__dest_ip="$(dig +short ${_destination_domain})"
+	_files_dir="${_ct_dir}/${_dom_dir}/files"
+	#_outbound_ip="$(ifconfig | grep 'inet addr:' | grep -v '127.0.0.1' |  cut -d: -f2 | awk '{ print $1 }' | head -1)"
+	_outbound_ip=$(wget http://ipinfo.io/ip -qO - )
+	_gridurl="${_destination_domain}.s$SITE.gridserver.com"
+
+}
+
+function debug(){
+	clear
+	echo "################ DEBUG VARIABLES ################"
+	set -o posix ; set | grep '^_' | grep -v 'posix'
+	echo "################ DEBUG VARIABLES ################"
+	echo
+	read -p "Press enter to continue, or Ctrl-C to cancel..... " enterKey
+}
+
+function checkQuota(){
+	uapi --user=${_username} Quota get_quota_info > /tmp/${_username}_quota
+	_inode_limit=$(cat /tmp/${_username}_quota | grep -w inode_limit | awk -F: '{print $2}')
+	_inodes_remain=$(cat /tmp/${_username}_quota | grep -w inodes_remain | awk -F: '{print $2}')
+	_inodes_used=$(find /home/${_username} | wc -l)
+	_megabyte_limit=$(cat /tmp/${_username}_quota | grep -w megabyte_limit | awk -F\' '{print $2}')
+	_megabytes_remain=$(cat /tmp/${_username}_quota | grep -w megabytes_remain | awk -F\' '{print $2}' | awk -F. '{print $1}')
+	_storageUsed=$(du -s /home/${_username} | awk '{print $1}')
+	_megabytes_used=$(( _storageUsed / 1000))
+	_disk_needed_kbyte=$(du -s "${_full_src_path}" | awk '{print $1}')
+	_disk_needed_mbyte=$((_disk_needed_kbyte / 1000))
+	_inodes_needed=$(find "${_full_src_path}" | wc -l)
+	#echo "===========QUOTA CHECK TESTING===========" | tee -a ${_migration_log};
+	#echo "Inode Limit: $_inode_limit" | tee -a ${_migration_log};
+	#echo "Inodes Remaining: $_inodes_remain" | tee -a ${_migration_log};
+	#echo "Inodes Used: $_inodes_used" | tee -a ${_migration_log};
+	#echo "Disk Limit: $_megabyte_limit" | tee -a ${_migration_log};
+	#echo "Disk Remaining: $_megabytes_remain" | tee -a ${_migration_log};
+	#echo "Disk Used: $_megabytes_used" | tee -a ${_migration_log};
+	if [[ "$_inode_limit" -ne "0" ]]; then
+		if [[ "$_inodes_needed" -lt "$_inodes_remain" ]]; then
+	    	echo "$_inodes_needed Inodes Needed, $_inodes_remain Inodes Available, Moving Forward" | tee -a ${_migration_log};
+		else
+			echo "$_inodes_needed Inodes Needed, $_inodes_remain Inodes Available \n Error, not enough Inodes available to copy files, will move files instead."
+			_moveinstead=true
+		fi
+	else
+		echo "Inodes Unlimited, Moving Forward" | tee -a ${_migration_log};
+	fi
+	if [[ "$_megabyte_limit" != "0.00" ]]; then
+		if [[ "$_disk_needed_mbyte" -lt "$_megabytes_remain" ]]; then
+	    echo "$_disk_needed_mbyte MB Neeeded, $_megabytes_remain MB Disk Space Available, Moving Forward" | tee -a ${_migration_log};
+		else
+			echo "$_disk_needed_mbyte MB Neeeded, $_megabytes_remain MB Disk Space Available \n Error, not enough Disk Space available to copy files, will move files instead."
+			_moveinstead=true
+		fi
+	else
+		echo "Disk Space Unlimited, Moving Forward" | tee -a ${_migration_log};
+	fi
+	rm -f /tmp/${_username}_quota
+#echo "=========END QUOTA CHECK TESTING=========" | tee -a ${_migration_log};
+}
+
+# Help section
+function helpMe(){
+	#output a usage message for the user
+	echo "Usage: `basename $0` options [-s source_dir] [-d destinaton_dir] [-f] [-l [-u username] ] [-h]";
+	echo -e "\n-s </path/to/source_dir/> : path to source directory\n-d </path/to/dest_dir/> : path to destination directory\n-f : force overwrite any existing files in the destination directory.";
+	echo -e "-l : list domains and document roots for user. Without the -u [username] option, you must be lower then the user's home directory on the file system (/home/username/...)";
+	echo -e "-u <username>: Only used when the -l option is selected in order to specify a user.";
+	echo -e "-S Source domain.";
+	echo -e "-D Destination domain";
+	echo -e "-a Type of Migration, leave off to see options";
+	echo -e "-h : Output this helpful guide.";
+	exit;
+}
+
+if [[ $# == 0 ]]; then
+	helpMe;
+fi
+
+OPTIND=1;
+
+# Declare variables
+declare _src_dir;
+declare _dest_dir;
+declare _force;
+declare _listdoms;
+declare _debug_mode;
+declare _username;
+declare _source_domain;
+declare _destination_domain;
+declare _type;
+declare _moveinstead;
+declare plat;
+declare _headless;
+
+
+while getopts "s:d:S:D:flxOu:h:t:a:z" opt; do
+	case "$opt" in
+		s) _src_dir=$OPTARG
+			;;
+		d) _dest_dir=$OPTARG
+			;;
+		S) _source_domain=$OPTARG
+			;;
+		D) _destination_domain=$OPTARG
+			;;
+		f) _force=true
+			;;
+		l) _listdoms=true
+			;;
+		x) _debug_mode=true
+			;;
+		u) _username=$OPTARG
+			;;
+		t) _type=$OPTARG
+			;;
+		O) _moveinstead=true
+			;;
+		a) plat=$OPTARG
+			;;
+		z) _headless=true ; #x headless arg, used for all tests.
+			plat="4" ; #x defaulting to gd cpanel destination. Remove this later when we have more platforms available for headless.
+		    ;;
+		h) helpMe
+			;;
+		*) helpMe
+			;;
+	esac
+done
+
+shift $((OPTIND-1))
+
+[[ "$1"="--" ]] && shift
+
+# Error check function - this hard stops upon failure
+function errorCheckFatal(){
+	if [[ $? -ne 0 ]]; then
+		echo -e "Operation failed. Fatal error, exiting." | tee -a ${_migration_log};
+		rmScript;
+		exit 101;
+	fi
+}
+
+# Error check function - this allows the user to stop or continue
+function errorCheckOption(){
+	if [[ $? -ne 0 ]]; then
+		echo -e "Operation failed." | tee -a ${_migration_log};
+		while true; do
+				echo
+				read -p "Would you like to continue? " yn;
+				case $yn in
+					[Yy]* ) break;;
+					[Nn]* ) echo -e "\nUser chose to exit after error." >> ${_migration_log}; rmScript; exit 101;;
+					* ) echo "Please answer yes or no.";;
+				esac
+			done
+	fi
+}
+
+# This will be used to create a new username and password
+function createNewDBDeets(){
+	# Create new database credentials
+	_sanitize_db_user=$(echo "$_dom_dir" | tr -d '-' | tr -d '.');
+	_new_db_user="ct_${_sanitize_db_user:0:4}_$(LC_CTYPE=C tr -dc 'a-z0-9' < /dev/urandom | head -c 5)";
+	_new_db_name=${_new_db_user};
+	_new_db_pass="$(LC_CTYPE=C tr -dc 'A-Za-z0-9_@#$%^&*~!' < /dev/urandom | head -c 24)";
+	_escape_new_pass=$(python -c "import re; re.escape('$_new_db_pass'); print(re.escape('$_new_db_pass'))");
+	_escape_old_pass=$(python -c "import re; re.escape('$_db_pass'); print(re.escape('$_db_pass'))");
+	# Check if the database user and database exist already on the shared cPanel server
+	case $panel in
+		cpanel ) if [[ $(sudo mysql -Nse "select concat('\'',User,'\'@\'',Host,'\'') as User from mysql.user WHERE User='${_new_db_user}';") || $(sudo mysql -Nse "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='${_new_db_name}';") ]]; then
+			createNewDBDeets;
+						fi;;
+		plesk ) if [[ $(mysql -u admin -p`cat /etc/psa/.psa.shadow` -Nse "select concat('\'',User,'\'@\'',Host,'\'') as User from mysql.user WHERE User='${_new_db_user}';") || $(mysql -u admin -p`cat /etc/psa/.psa.shadow` -Nse "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='${_new_db_name}';") ]]; then
+			createNewDBDeets;
+		fi;;
+		grid ) gridDB;;
+
+		* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+	esac
+
+}
+
+function gridDB(){
+	if [[ $_headless == true ]]
+		then
+			echo "Headless mode, we should not have made it here. Forcing fail."
+			exit
+		else
+			read -p "You must log into the Account Center and create the database now. Once you have done so press enter." enterKey
+			read -p "What is the database name? " griddbname
+			read -p "What is the database user? " griddbuser
+			read -p "What is the database password? " griddbpass
+			read -p "What is the database hostname? " griddbhost
+
+			_new_db_user=${griddbuser}
+			_new_db_name=${griddbname};
+			_new_db_pass="${griddbpass}";
+			_new_db_host="${griddbhost}";
+			_escape_new_pass=$(python -c "import re; re.escape('$_new_db_pass'); print(re.escape('$_new_db_pass'))");
+		fi
+}
+
+function shellExec(){
+	if [[ $_headless == true ]]
+		then
+			echo "Headless mode, we should not have made it here. Forcing fail."
+			exit
+		else
+################ Get FTP Data ################
+read -p "FTP IP Address: " ftpip
+read -p "FTP User: " ftpuser
+read -p "FTP Pass: " ftppass
+################ List Starting Directory ################
+ftp -n $ftpip << End-Of-Session
+	user $ftpuser "$ftppass"
+	binary
+	ls
+	bye
+End-Of-Session
+read -p "FTP Doc Root: " ftpdocroot
+################ Create PHP Dump File ################
+cat << EOF > ct_mysqldump.php
+	<?php
+	exec('mysqldump --host=${_old_dbhost} --user=${_db_user} --password=${_db_pass} ${_db_name} > ${_dmp_file}.sql');
+	?>
+EOF
+echo "File ct_mysqldump.php has been created"
+echo "--------------------"
+################ Upload PHP Dump File ################
+echo "Uploading File"
+ftp -n $ftpip << End-Of-Session
+	user $ftpuser "$ftppass"
+	binary
+	cd $ftpdocroot
+	put "ct_mysqldump.php"
+	bye
+End-Of-Session
+echo "File ct_mysqldump.php has been uploaded"
+echo "--------------------"
+################ Init Dump ################
+echo "Starting Dump"
+curl -X POST -H "Host: ${_source_domain}" http://$ftpip/ct_mysqldump.php
+echo "Dump Complete"
+echo "--------------------"
+################ Grab Dump ################
+echo "Grabbing Dump"
+curl -H "Host: ${_source_domain}" -o ${_ct_dir}/${_dom_dir}/db/${_dmp_file} http://$ftpip/${_dmp_file}.sql
+echo "MySQL Dump Downloaded to ${_ct_dir}/${_dom_dir}/db/${_dmp_file}"
+echo "--------------------"
+################ Testing Dump ################
+echo "Last 10 lines of dump:"
+tail ${_ct_dir}/${_dom_dir}/db/${_dmp_file}
+echo "echo --------------------"
+################ Cleanup ################
+echo "Press enter for cleanup"
+read enterKey
+echo "Starting Cleanup"
+ftp -n $ftpip << End-Of-Session
+	user $ftpuser "$ftppass"
+	binary
+	cd $ftpdocroot
+	delete "ct_mysqldump.php"
+	delete "${_dmp_file}.sql"
+	bye
+End-Of-Session
+rm -rf ct_mysqldump.php
+echo "Cleanup Complete"
+echo "--------------------"
+echo "Cleanup Verification"
+ftp -n $ftpip << End-Of-Session
+	user $ftpuser "$ftppass"
+	binary
+	cd $ftpdocroot
+	ls
+	bye
+End-Of-Session
+echo "Goodbye"
+echo "--------------------"
+fi
+}
+
+# Test Database connection
+function dbTest(){
+    if mysql --connect_timeout 10 -h ${_old_dbhost} -P ${_db_port} -u ${_db_user} -p${_db_pass} -e "use ${_db_name}"; then
+    	dbDeets
+	else
+		if [[ $_headless == true ]]
+			then
+				echo "Headless mode, unable to connect to database, skipping."
+			else
+		echo
+		echo "Unable to access source database."
+		echo "The host you're logged into has an external IP of: ${_outbound_ip}"
+		echo "You may need to whitelist ${_outbound_ip} on the source DB server."
+		# echo "Notice: GoDaddy temporarily disabled Remote SQL button."
+		# echo "cPanel Path for Remote SQL sql/managehost.html"
+		echo
+		echo "1) Try Again"
+		echo "2) Update Hostname"
+		echo "3) Shell Exec"
+		echo "4) Create Database Only (No Import/Export)"
+		echo "5) Skip Database"
+		read -p "What would you like to do now? " dbcase;
+		case $dbcase in
+			1) dbTest;;
+			2) _old_dbhost_bak=${_old_dbhost}
+				read -p "Enter the source DB hostname or IP: " _old_dbhost;
+				dbTest;;
+			3) _shell_exec='true'
+				shellExec;
+				read -p "Did the shell_exec work? " yn;
+				case $yn in
+					[Yy]* ) dbDeets;
+						break;;
+					[Nn]* ) _shell_exec='false'
+						dbTest;;
+					* ) echo "Please answer yes or no.";;
+				esac;;
+			4) _skip_export='true'
+				dbDeets;;
+			5) ;;
+			* ) dbTest;;
+		esac
+		fi
+    fi
+}
+
+# Export database from source server
+function dbExport(){
+	# Log the next actions
+	echo -e "\nAttempting to export database from source server" | tee -a ${_migration_log};
+	# If wp-config exists then try to dump the DB
+	if [[ $_headless == true ]]; then
+		mysqldump --compress --add-drop-table --hex-blob --single-transaction --complete-insert --extended-insert=FALSE --net_buffer_length=5000 -h ${_old_dbhost} -P ${_db_port} -u ${_db_user} -p${_db_pass} ${_db_name} > ${_ct_dir}/${_dom_dir}/db/${_dmp_file};
+	else
+		mysqldump --compress --add-drop-table --hex-blob --single-transaction --complete-insert --extended-insert=FALSE --net_buffer_length=5000 -v -h ${_old_dbhost} -P ${_db_port} -u ${_db_user} -p${_db_pass} ${_db_name} > ${_ct_dir}/${_dom_dir}/db/${_dmp_file};
+	fi
+}
+
+# Create DB on the destination server
+function dbCreate(){
+	# Log database and database user creation
+	echo -e "\nCreating database ${_new_db_name} and user ${_new_db_user}" | tee -a ${_migration_log};
+	# Create new database
+	case $panel in
+		cpanel ) sudo mysql -e "create database ${_new_db_name};" && sudo mysql -e "GRANT ALL ON ${_new_db_name}.* TO ${_new_db_user}@'localhost' IDENTIFIED BY '${_new_db_pass}';" && /usr/local/cpanel/bin/dbmaptool $(pwd | awk -F'/' '{print $3}') --type mysql --dbusers ${_new_db_user} --dbs ${_new_db_name};;
+		plesk ) if [[ -z $_destination_primary_domain ]] || [[ "$_destination_primary_domain" == "NULL" ]]; then
+						/usr/local/psa/bin/database --create ${_new_db_name} -domain ${_destination_domain} -type mysql -server localhost:3306 -passwd "${_new_db_pass}" -add_user ${_new_db_user}
+					else
+						/usr/local/psa/bin/database --create ${_new_db_name} -domain ${_destination_primary_domain} -type mysql -server localhost:3306 -passwd "${_new_db_pass}" -add_user ${_new_db_user}
+					fi
+						;;
+		grid ) ;;
+		* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+	esac
+
+}
+
+# Function to import the database
+function dbImport(){
+	# Log MySQL dump file Import
+	echo -e "\nImporting ${_ct_dir}/${_dom_dir}/db/${_dmp_file} into ${_new_db_name}" | tee -a ${_migration_log};
+	# Import the MySQL dump file into the newly created database
+	case $panel in
+		cpanel ) _new_db_host="localhost";;
+		plesk ) _new_db_host="localhost";;
+		grid ) ;;
+		* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+	esac
+	mysql --force -u${_new_db_user} -h ${_new_db_host} -p${_new_db_pass} ${_new_db_name} < ${_ct_dir}/${_dom_dir}/db/${_dmp_file} ;
+
+	# Place in completion notice
+	echo -e "\nDatabase import complete" | tee -a ${_migration_log};
+}
+
+# Import MySQL database
+function dbDeets(){
+	# Call function createNewDBDeets to create new database details
+	createNewDBDeets;
+	# Check _host_trigger
+	if [[ ${_skip_export} != true || ${_shell_exec} == true ]]; then
+		if [[ ${_host_trigger} == true && "${_old_dbhost}" != "abcxyz" ]]; then
+			if [[ ${_shell_exec} != true ]]; then
+				dbExport;
+			fi
+			dbCreate;
+			dbImport;
+			echo -e "Database host already set to localhost." | tee -a ${_migration_log};
+		elif [[ ${_host_trigger} == true && "${_old_dbhost}" == "abcxyz" ]]; then
+			echo -e "\nDatabase host was left blank intentionally." | tee -a ${_migration_log};
+		else
+			if [[ ${_shell_exec} != true ]]; then
+				dbExport;
+			fi
+			dbCreate;
+			dbImport;
+			# Log changes to db_host
+			case $panel in
+				cpanel ) echo -e "\nSwapping out ${_old_dbhost} for localhost." | tee -a ${_migration_log}
+									_new_db_host="localhost";;
+				plesk ) echo -e "\nSwapping out ${_old_dbhost} for localhost." | tee -a ${_migration_log}
+								_new_db_host="localhost";;
+				grid ) echo -e "\nSwapping out ${_grid_old_dbhost} for ${_new_db_host}." | tee -a ${_migration_log};
+					_old_dbhost=${_grid_old_dbhost};;
+				* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+			esac
+
+			# Swap out the hostname in the conf file
+			if [[ -z "${_old_dbhost_bak}" ]]; then
+				sed -i "s/${_old_dbhost}/${_new_db_host}/g" ${_conf_file};
+				if [[ ${_admin_conf_file} ]]; then
+					sed -i "s/${_old_dbhost}/${_new_db_host}/g" ${_admin_conf_path}/${_admin_conf_file};
+				fi
+			else
+				sed -i "s/${_old_dbhost_bak}/${_new_db_host}/g" ${_conf_file};
+				if [[ ${_admin_conf_file} ]]; then
+					sed -i "s/${_old_dbhost_bak}/${_new_db_host}/g" ${_admin_conf_path}/${_admin_conf_file};
+				fi
+			fi
+		fi
+	else
+		echo
+		dbCreate;
+		echo "Login to old database with User: ${_db_user} and Password: ${_db_pass}"
+		read -p "Export & Import the database ${_db_name} into ${_new_db_name}:${_new_db_pass} on your own now.... Press enter when complete to continue." enterKey
+		sed -i "s/${_old_dbhost}/localhost/g" ${_conf_file};
+		echo
+	fi
+
+	# Logging changes to _db_user
+	echo -e "Swapping out database user ${_db_user} for ${_new_db_user}" | tee -a ${_migration_log};
+	sed -i -e "s/\<${_db_user}\>/${_new_db_user}/1" ${_conf_file};
+	if [[ ${_admin_conf_file} ]]; then
+		sed -i -e "s/\<${_db_user}\>/${_new_db_user}/1" ${_admin_conf_path}/${_admin_conf_file};
+	fi
+
+	# Logging changes to _db_name
+	echo -e "Swapping out database name ${_db_name} for ${_new_db_name}" | tee -a ${_migration_log};
+	sed -i -e "s/\<${_db_name}\>/${_new_db_name}/1" ${_conf_file};
+	if [[ ${_admin_conf_file} ]]; then
+		sed -i -e "s/\<${_db_name}\>/${_new_db_name}/1" ${_admin_conf_path}/${_admin_conf_file};
+	fi
+
+	# Logging changes to _db_pass
+	echo -e "Swapping out the database password ${_db_pass} with ${_new_db_pass}\n" | tee -a ${_migration_log};
+									 sed -i -re "s/${_escape_old_pass}/${_escape_new_pass}/1" ${_conf_file};
+									 if [[ ${_admin_conf_file} ]]; then
+										 sed -i -re "s/${_escape_old_pass}/${_escape_new_pass}/1" ${_admin_conf_path}/${_admin_conf_file};
+									 fi
+}
+
+#Check the set database host
+function dbHostCheck(){
+	if [[ "${_old_dbhost}" == "localhost" || -z "${_old_dbhost}" ]]; then
+
+		case $panel in
+			cpanel ) _host_trigger=true;;
+			plesk ) _host_trigger=true;;
+			grid ) _host_trigger=false
+				   _grid_old_dbhost=${_old_dbhost};;
+			* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+		esac
+		if [[ $_headless == true ]]
+			then
+				echo "Headless mode, forcing _old_dbhost to 'localhost'."
+				_old_dbhost="localhost"
+			else
+				echo -e "The source database host is currently set to 'localhost'.";
+				read -p "Enter the correct source DB hostname, or 'abcxyz' to skip this: `echo $'\n> '`" _old_dbhost;
+		fi
+		if [[ -z "${_old_dbhost}" ]]; then
+			dbHostCheck;
+		fi
+	fi
+}
+
+# Credentials for wordpress sites
+function wpCreds(){
+	# Set new vars
+	_db_name=$(awk -F [\'\"] '/DB_NAME/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file})
+	_db_user=$(awk -F [\'\"] '/DB_USER/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file})
+	_db_pass=$(awk -F [\'\"] '/DB_PASSWORD/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file})
+	# Set the _old_dbhost variable
+	_old_dbhost=$(awk -F [\'\"] '/DB_HOST/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file})
+	if echo $_old_dbhost | grep -q '.*:.*'; then
+		_db_port=$(echo ${_old_dbhost} | cut -d: -f2);
+		_old_dbhost=$(echo ${_old_dbhost} | cut -d: -f1);
+	else
+		_db_port="3306";
+	fi
+	_dmp_file="${_db_name}_$(date +%F-%T).sql";
+    _cmsVersion=$(grep "wp_version" ${_conf_path}/wp-includes/version.php | grep -v '*' | awk -F\' '{print $2}');
+	#_ln=$(grep -n "^define('DB_PASSWORD" wp-config.php | cut -f1 -d:)
+}
+
+function prestashopCreds(){
+	# Set new vars
+	_db_name=$(awk -F [\'\"] '/_DB_NAME_/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file})
+	_db_user=$(awk -F [\'\"] '/_DB_USER_/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file})
+	_db_pass=$(awk -F [\'\"] '/_DB_PASSWD_/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file})
+	# Set the _old_dbhost variable
+	_old_dbhost=$(awk -F [\'\"] '/_DB_SERVER_/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file})
+	if echo $_old_dbhost | grep -q '.*:.*'; then
+		_db_port=$(echo ${_old_dbhost} | cut -d: -f2);
+		_old_dbhost=$(echo ${_old_dbhost} | cut -d: -f1);
+	else
+		_db_port="3306";
+	fi
+	_dmp_file="${_db_name}_$(date +%F-%T).sql";
+}
+
+# Credentials for magento sites
+function mageCreds(){
+	# Set new vars
+	_db_name=$(egrep "dbname" ${_conf_file} | awk -F"[" '{print $3}' | awk -F"]" '{print $1}'| head -n 1);
+	_db_user=$(egrep "username" ${_conf_file} | awk -F"[" '{print $3}' | awk -F"]" '{print $1}'| head -n 1);
+	_db_pass=$(egrep "password" ${_conf_file} | awk -F"[" '{print $3}' | awk -F"]" '{print $1}'| head -n 1);
+	# Set the _old_dbhost variable
+	_old_dbhost=$(egrep "host" ${_conf_file} | awk -F"[" '{print $3}' | awk -F"]" '{print $1}'| head -n 1);
+	_db_port="3306";
+	_dmp_file="${_db_name}_$(date +%F-%T).sql";
+    _cmsVersion=$(grep -A6 'static function getVersionInfo' ${_conf_path}/../Mage.php | grep "=>" | awk -F\' '{print $4}' | paste -sd ".");
+}
+
+# Credentials for magento2 sites
+function mage2Creds(){
+  # Set new vars
+  _db_name=$(egrep "dbname" ${_conf_file} | awk -F"'" '{print $4}');
+  _db_user=$(egrep "username" ${_conf_file} | awk -F"'" '{print $4}');
+  _db_pass=$(egrep "password" ${_conf_file} | awk -F"'" '{print $4}');
+  # Set the _old_dbhost variable
+  _old_dbhost=$(egrep "host" ${_conf_file} | awk -F"'" '{print $4}');
+  _db_port="3306";
+  _dmp_file="${_db_name}_$(date +%F-%T).sql";
+  _cmsVersion=$(grep -A6 'static function getVersionInfo' ${_conf_path}/../Mage.php | grep "=>" | awk -F\' '{print $4}' | paste -sd ".");
+}
+
+# Credentials for Drupal sites
+function drupalCreds(){
+	# Set new vars
+	if grep -q "db_url" ${_conf_file}; then
+    	_db_name=$(egrep 'db_url' ${_conf_file} | egrep -v '(\*)' | awk '{sub(/.*\//,"");sub(/\x27.*/,"");print;}')
+		_db_user=$(egrep 'db_url' ${_conf_file} | egrep -v '(\*)' | awk '{sub(/.*mysql:\/\//,"");sub(/:.*/,"");print;}')
+		_db_pass=$(egrep 'db_url' ${_conf_file} | egrep -v '(\*)' | awk '{sub(/.*:/,"");sub(/@.*/,"");print;}')
+		# Set the _old_dbhost variable
+		_old_dbhost=$(egrep 'db_url' ${_conf_file} | egrep -v '(\*)' | awk '{sub(/.*@/,"");sub(/\/.*/,"");print;}')
+  	else
+		_db_name=$(egrep 'database' ${_conf_file} | egrep -v '(\*|\$)' | awk -F"'" '{ print $4 }' | head -n 1);
+		_db_user=$(egrep 'user' ${_conf_file} | egrep -v '(\*|\$)' | awk -F"'" '{ print $4 }' | head -n 1);
+		_db_pass=$(awk -F [\'\"] '/password/ && !/^ [*]/ && !/^[*]/ && !/^[#]/ { print $4 }' ${_conf_file});
+		# Set the _old_dbhost variable
+		_old_dbhost=$(egrep 'host' ${_conf_file} | egrep -v '(\*|\$)' | awk -F"'" '{ print $4 }' | head -n 1);
+		_db_port=$(egrep 'port' ${_conf_file} | egrep -v '(\*|\$)' | awk -F"'" '{ print $4 }' | head -n 1);
+    fi
+	if [[ -z ${_db_port} ]]; then
+		_db_port="3306";
+	fi
+	_dmp_file="${_db_name}_$(date +%F-%T).sql";
+}
+
+# Credentials for Joomla sites
+function joomlaCreds(){
+	# Set new vars
+	_db_name=$(egrep '\$db ' ${_conf_file} | awk -F"'" '{ print $2 }' | head -n 1);
+	_db_user=$(egrep '\$user ' ${_conf_file} | awk -F"'" '{ print $2 }' | head -n 1);
+	_db_pass=$(egrep '\$password ' ${_conf_file} | awk -F"'" '{ print $2 }' | head -n 1);
+	# Set the _old_dbhost variable
+	_old_dbhost=$(egrep '\$host ' ${_conf_file} | awk -F"'" '{ print $2 }' | head -n 1);
+	if echo $_old_dbhost | grep -q '.*:.*'; then
+		_db_port=$(echo ${_old_dbhost} | cut -d: -f2);
+		_old_dbhost=$(echo ${_old_dbhost} | cut -d: -f1);
+	else
+		_db_port="3306";
+	fi
+	_dmp_file="${_db_name}_$(date +%F-%T).sql";
+}
+
+function zencartCreds(){
+	# Set new vars
+	_db_name=$(grep -P "(^define.*DB_DATABASE|\s+.*DB_DATABASE)" ${_conf_file} |  grep -Pv "#|//" | awk -F"'|\"" '{print $4}' | head -n 1);
+	_db_user=$(grep -P "(^define.*DB_SERVER_USERNAME|\s+.*DB_SERVER_USERNAME)" ${_conf_file} |  grep -Pv "#|//" | awk -F"'|\"" '{print $4}' | head -n 1);
+	_db_pass=$(grep -P "(^define.*DB_SERVER_PASSWORD|\s+.*DB_SERVER_PASSWORD)" ${_conf_file} |  grep -Pv "#|//" | awk -F"'|\"" '{print $4}' | head -n 1);
+	# Set the _old_dbhost variable
+	_old_dbhost=$(grep -P "(^define.*DB_SERVER|\s+.*DB_SERVER)" ${_conf_file} |  grep -Pv "#|//|USERNAME|PASSWORD" | awk -F"'|\"" '{print $4}' | head -n 1);
+	if echo $_old_dbhost | grep -q '.*:.*'; then
+		_db_port=$(echo ${_old_dbhost} | cut -d: -f2);
+		_old_dbhost=$(echo ${_old_dbhost} | cut -d: -f1);
+	else
+		_db_port="3306";
+	fi
+	_dmp_file="${_db_name}_$(date +%F-%T).sql";
+}
+
+function zencartAdmin(){
+	_temp_ifs="$IFS"
+	IFS=$'\n'
+	_file_list=($(find "${_full_dest_path}" -maxdepth 6 -type f -name configure.php -print0 | xargs -0 grep -l "WS_ADMIN" 2> /dev/null))
+	_file_list+=("None")
+	IFS="$_temp_ifs"
+	if [[ "${#_file_list[@]}" -gt "1" ]]; then # If options other than none.....
+        until [[ ${_admin_valid} ]]; do
+            x=1;
+						echo "Please select the admin configuraton file....."
+						echo -e "You are currently in $(pwd).";
+            for d in "${_file_list[@]}"; do
+                echo "$x: ${d#*./}";
+                x=$(($x+1));
+        		done
+        		read -p "Please enter in your choice: " _fc;  # _fc is file choice
+        		_fc=$((${_fc}-1));
+        		# Check the values in the array and validate the user input
+						if [[ ${_file_list[${_fc}]} == "None" ]]; then
+							echo -e "\nNo admin configuration selected. We will not edit the admin configuration file.\n" | tee -a ${_migration_log};
+							_admin_valid=true;
+            elif (( ${_fc} >= 0 && ${_fc} < "${#_file_list[@]}" )); then
+                _admin_conf_path=${_file_list[${_fc}]%/*}; # Exclude file name from _file_list
+								_admin_conf_file=${_file_list[${_fc}]##*/}; # Exclude path from _file_list
+								_admin_valid=true;
+            else
+                echo -e "\nPlease enter in a valid choice.\n";
+            fi
+        done
+
+  fi
+}
+
+function opencartCreds(){
+	# Set new vars
+	_db_name=$(awk -F [\'\"] '/DB_DATABASE/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file});
+	_db_user=$(awk -F [\'\"] '/DB_USERNAME/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file});
+	_db_pass=$(awk -F [\'\"] '/DB_PASSWORD/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file});
+	# Set the _old_dbhost variable
+	_old_dbhost=$(awk -F [\'\"] '/DB_HOSTNAME/ && !/^[\/]/ && !/^[ #]/ {print $4}' ${_conf_file});
+	if echo $_old_dbhost | grep -q '.*:.*'; then
+		_db_port=$(echo ${_old_dbhost} | cut -d: -f2);
+		_old_dbhost=$(echo ${_old_dbhost} | cut -d: -f1);
+	else
+		_db_port="3306";
+	fi
+	_dmp_file="${_db_name}_$(date +%F-%T).sql";
+}
+
+function opencartAdmin(){
+	_temp_ifs="$IFS"
+	IFS=$'\n'
+	_file_list=($(find "${_full_dest_path}" -maxdepth 6 -type f -name config.php -print0 | xargs -0 grep -l "DIR_DATABASE" 2> /dev/null))
+	IFS="$_temp_ifs"
+	_file_list+=("None")
+	if [[ "${#_file_list[@]}" -gt "1" ]]; then # If options other than none.....
+        until [[ ${_admin_valid} ]]; do
+            x=1;
+			echo "Please select the admin configuraton file....."
+			echo -e "You are currently in $(pwd).";
+            for d in "${_file_list[@]}"; do
+                echo "$x: ${d#*./}";
+                x=$(($x+1));
+            done
+            read -p "Please enter in your choice: " _fc;  # _fc is file choice
+            _fc=$((${_fc}-1));
+            # Check the values in the array and validate the user input
+			if [[ ${_file_list[${_fc}]} == "None" ]]; then
+				echo -e "\nNo admin configuration selected. We will not edit the admin configuration file.\n" | tee -a ${_migration_log};
+				_admin_valid=true;
+            elif (( ${_fc} >= 0 && ${_fc} < "${#_file_list[@]}" )); then
+                _admin_conf_path=${_file_list[${_fc}]%/*}; # Exclude file name from _file_list
+				_admin_conf_file=${_file_list[${_fc}]##*/}; # Exclude path from _file_list
+				_admin_valid=true;
+            else
+                echo -e "\nPlease enter in a valid choice.\n";
+            fi
+        done
+
+    fi
+}
+
+function popArray(){
+	f=$1
+	for (( i=0; i<${#_file_list[@]}; i++ )); do
+		if [[ ${_file_list[i]} == $f ]]; then
+			_temp_ifs="$IFS"
+			IFS=$'\n'
+			_file_list=( "${_file_list[@]:0:$i}" "${_file_list[@]:$((i + 1))}" )
+			IFS="$_temp_ifs"
+		fi
+	done
+}
+function removeNonCMS(){
+
+	for f in "${_file_list[@]}"
+	do
+	   file=$(basename $f)
+	   case "$file" in
+	  configuration.php) if ! grep -q "class JConfig" "$f"; then
+	                        popArray $f
+	                       fi;;
+	  settings.php) if ! grep -q "Drupal" "$f"; then
+	                       popArray $f
+	                      fi;;
+	  configure.php) if ! grep -q "Zen Cart" "$f"; then
+	                        popArray $f
+	                       fi;;
+	 config.php) if ! grep -q "HTTP_CATALOG" "$f"; then
+	                        popArray $f
+	                       fi;;
+	 settings.inc.php) if ! grep -q "_PS_VERSION_" "$f"; then
+	                        popArray $f
+	                       fi;;
+	   esac
+	done
+}
+# Initiate search for config files
+function searchConf(){
+  _temp_ifs="$IFS"
+  IFS=$'\n'
+  _file_list=($(find "${_full_dest_path}" -maxdepth 7 -type f \( -name "wp-config.php" -o -name "configuration.php" -o -name "settings.php" -o -name "local.xml" -o -name "env.php" -o -name "configure.php" -o -name "config.php" -o -name "settings.inc.php" \) 2> /dev/null))
+  IFS="$_temp_ifs"
+  removeNonCMS ;#x function updated for headless
+  _file_list+=("None")
+  if [[ "${#_file_list[@]}" -gt "1" ]]; then # If options other than none.....
+    if [[ $_headless == true ]]; then
+      echo "HEADLESS MODE: Found the following possible connection strings:"
+      x=1;
+      echo -e "You are currently in $(pwd).";
+      for d in "${_file_list[@]}"; do
+        echo -e "\t$x: ${d#*./}";
+        x=$(($x+1));
+      done
+      echo -e "\nHEADLESS MODE: These will need to be manually reviewed."
+      _temp_ifs="$IFS"
+      IFS=$'\n'
+      _first_config=($(find "${_full_dest_path}" -maxdepth 1 -type f \( -name "wp-config.php" -o -name "configuration.php" -o -name "settings.php" -o -name "local.xml" -o -name "env.php" -o -name "configure.php" -o -name "config.php" -o -name "settings.inc.php" \) 2> /dev/null))
+      IFS="$_temp_ifs"
+      removeNonCMS ;#x function updated for headless
+      echo -e "HEADLESS MODE: db connection string detection limited to 1 config file: ${_first_config}\n"
+      _conf_path=${_first_config%/*}; # Exclude file name from _file_list
+      _conf_file=${_first_config##*/}; # Exclude path from _file_list
+      if [[ ${_conf_file} == "wp-config.php" ]]; then
+        echo -e "WordPress CMS located.\n" | tee -a ${_migration_log};
+        _cms="wordpress";
+      elif [[ ${_conf_file} == "configuration.php" ]]; then
+        echo -e "Joomla CMS located.\n" | tee -a ${_migration_log};
+        _cms="joomla";
+      elif [[ ${_conf_file} == "settings.php" ]]; then
+        echo -e "Drupal CMS located.\n" | tee -a ${_migration_log};
+        _cms="drupal";
+      elif [[ ${_conf_file} == "local.xml" ]]; then
+        echo -e "Magento CMS located.\n" | tee -a ${_migration_log};
+        _cms="magento";
+      elif [[ ${_conf_file} == "env.php" ]]; then
+        echo -e "Magento2 CMS located.\n" | tee -a ${_migration_log};
+        _cms="magento2";
+      elif [[ ${_conf_file} == "configure.php" ]]; then
+        echo -e "ZenCart CMS located.\n" | tee -a ${_migration_log};
+        _cms="zencart";
+      elif [[ ${_conf_file} == "config.php" ]]; then
+        echo -e "OpenCart CMS located.\n" | tee -a ${_migration_log};
+        _cms="opencart";
+      elif [[ ${_conf_file} == "settings.inc.php" ]]; then
+        echo -e "PrestaShop CMS located.\n" | tee -a ${_migration_log};
+        _cms="prestashop";
+      else
+        _cms="none"
+      fi
+    else
+      until [[ ${_valid} ]]; do
+        x=1;
+        echo -e "You are currently in $(pwd).";
+        for d in "${_file_list[@]}"; do
+          echo "$x: ${d#*./}";
+          x=$(($x+1));
+        done
+        read -p "Please enter in your choice: " _fc;  # _fc is file choice
+        _fc=$((${_fc}-1));
+        # Check the values in the array and validate the user input
+        if [[ ${_file_list[${_fc}]} == "None" ]]; then
+          echo -e "\nNo CMS selected.\n" | tee -a ${_migration_log};
+          _cms="none";
+          _valid=true;
+        elif (( ${_fc} >= 0 && ${_fc} < "${#_file_list[@]}" )); then
+          _conf_path=${_file_list[${_fc}]%/*}; # Exclude file name from _file_list
+          _conf_file=${_file_list[${_fc}]##*/}; # Exclude path from _file_list
+          _valid=true;
+          if [[ ${_conf_file} == "wp-config.php" ]]; then
+            echo -e "WordPress CMS located.\n" | tee -a ${_migration_log};
+            _cms="wordpress";
+          elif [[ ${_conf_file} == "configuration.php" ]]; then
+            echo -e "Joomla CMS located.\n" | tee -a ${_migration_log};
+            _cms="joomla";
+          elif [[ ${_conf_file} == "settings.php" ]]; then
+            echo -e "Drupal CMS located.\n" | tee -a ${_migration_log};
+            _cms="drupal";
+          elif [[ ${_conf_file} == "local.xml" ]]; then
+            echo -e "Magento CMS located.\n" | tee -a ${_migration_log};
+            _cms="magento";
+          elif [[ ${_conf_file} == "env.php" ]]; then
+            echo -e "Magento2 CMS located.\n" | tee -a ${_migration_log};
+            _cms="magento2";
+          elif [[ ${_conf_file} == "configure.php" ]]; then
+            echo -e "ZenCart CMS located.\n" | tee -a ${_migration_log};
+            _cms="zencart";
+          elif [[ ${_conf_file} == "config.php" ]]; then
+            echo -e "OpenCart CMS located.\n" | tee -a ${_migration_log};
+            _cms="opencart";
+          elif [[ ${_conf_file} == "settings.inc.php" ]]; then
+            echo -e "PrestaShop CMS located.\n" | tee -a ${_migration_log};
+            _cms="prestashop";
+          fi
+        else
+          echo -e "\nPlease enter in a valid choice.\n";
+        fi
+      done
+    fi ;#xxxxx
+    if [[ ${_conf_path} ]]; then
+      cd ${_conf_path};
+    fi
+    case "${_cms}" in
+      "wordpress") wpCreds;
+        dbHostCheck; # Check the _old_dbhost
+        dbTest; # Test DB Connection
+        homeUrl; # Modify WP home and siteurls.
+        doSAP # SAP
+        ;;
+      "joomla") joomlaCreds;
+        dbHostCheck; # Check the _old_dbhost
+        dbTest; # Test DB Connection
+        #liveSite; # Modify Joomla live_site
+        doSAP # SAP
+        ;;
+      "drupal") drupalCreds;
+        dbHostCheck; # Check the _old_dbhost
+        dbTest; # Test DB Connection
+        ;;
+      "magento") mageCreds;
+        dbHostCheck; # Check the _old_dbhost
+        dbTest; # Test DB Connection
+        ;;
+      "magento2") mage2Creds;
+        dbHostCheck; # Check the _old_dbhost
+        dbTest; # Test DB Connection
+        ;;
+      "prestashop") prestashopCreds;
+        dbHostCheck; # Check the _old_dbhost
+        dbTest; # Test DB Connection
+        prestashopUrl;
+        ;;
+      "zencart") zencartCreds;
+        if [[ $_headless == true ]]; then
+          echo "Headless mode, not editing ZenCart admin. Please locate and update admin connection string manually"
+        else
+          zencartAdmin; # Find admin configuration file
+        fi
+        dbHostCheck; # Check the _old_dbhost
+        dbTest; # Test DB Connection
+        doSAP # SAP
+        ;;
+      "opencart") opencartCreds;
+        if [[ $_headless == true ]]; then
+          echo "Headless mode, not editing OpenCart admin. Please locate and update admin connection string manually"
+        else
+          opencartAdmin; # Find admin configuration file
+        fi
+        dbHostCheck; # Check the _old_dbhost
+        dbTest; # Test DB Connection
+        doSAP # SAP
+        ;;
+      "none") ;;
+    esac
+  elif [[ "${#_file_list[@]}" -lt "2" ]]; then # If none is the only option
+    echo "<font color='red'>" >> "${_migration_log}"
+    tput setaf 1; echo -e "There are some MySQL connection strings being used but the CMS/application type is unknown. Please manually review the files in order to complete the migration." | tee -a "${_migration_log}"; tput setaf 7
+    echo "</font>" >> "${_migration_log}"
+    echo -e "Note, this list will include files that have a database connector. The connection strings may be in a different file." | tee -a "${_migration_log}";
+    for constring in "${_connectors[@]}"; do
+      echo "$constring" | tee -a "${_migration_log}";
+    done
+    read -p "Press the enter key to acknowledge you understand there are unknown connection strings."
+    echo
+  fi
+}
+# List only the primary domain and document root.
+function listPrimary(){
+	local _dom=$(grep main_domain /var/cpanel/userdata/${_username}/main | cut -d' ' -f2);
+	echo "${_dom} ->  $(cat /var/cpanel/userdata/${_username}/${_dom} | grep documentroot | cut -d" " -f2)"
+}
+
+# List add-on domains and their document root.
+function listAddOns(){
+	declare local _dom;
+	declare local _domfile;
+	sed '/main_domain/q' /var/cpanel/userdata/${_username}/main | grep [:alnum:] | grep -v main_domain | sed '/addon/d' | while read _dom _domfile; do echo "$(echo ${_dom} | cut -d: -f1)  ->  $(grep 'documentroot' /var/cpanel/userdata/${_username}/${_domfile} | cut -d" " -f2)"; done
+}
+
+# List subdomains and their document root.
+function listSubDoms(){
+	sed -n '/sub_domains/,$p' /var/cpanel/userdata/${_username}/main | cut -d' ' -f4 | sed '/^$/d' | while read _subdom; do echo "${_subdom}  ->  $(grep 'documentroot' /var/cpanel/userdata/${_username}/${_subdom}| cut -d" " -f2 | column -t)"; done
+}
+
+# Check to see if the user wants a domain listing
+function listDoms(){
+	if [[ ${_listdoms} == true ]]; then
+		setVars
+		echo -e "Main:"; listPrimary;
+		echo -e "\nAddon:"; listAddOns;
+		echo -e "\nSubdomain:"; listSubDoms;
+		exit
+	fi
+}
+
+# Move files into place
+function moveFiles(){
+	# Set array of paths to exclude from the rsync command
+	case $panel in
+		cpanel ) checkQuota;
+							# | grep -v "cache:"
+							# | sort | uniq
+							# these were added to below line to fix MGDSVC-2720
+				 _tmp_array=($(grep -RI "documentroot" /var/cpanel/userdata/ | grep -v "cache:" | sed -e 's#/var/cpanel/userdata/##;s#/# #;s/:documentroot: / /;1isysuser domain doc_root\' | awk '{print $3}' | column -t | grep "$(pwd | awk -F'/' '{print $3}')" | grep "${_full_dest_path}/" | sed "s%${_full_dest_path}/%%g" | sort | uniq ));;
+		plesk ) _disk_needed_kbyte=$(du -s "${_full_src_path}" | awk '{print $1}');
+				_disk_needed_mbyte=$((_disk_needed_kbyte / 1000));
+				_tmp_array=$(mysql -u admin -p`cat /etc/psa/.psa.shadow` -Nse "select www_root from psa.hosting where www_root like '${_full_dest_path}/%';" | grep "${_full_dest_path}/" | sed "s%${_full_dest_path}/%%g");
+				if [[ -z $_tmp_array ]]; then _tmp_array="nothing"; fi;;
+		grid ) _tmp_array="nothing";;
+		* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+	esac
+	# declare actual _exclusion_array and set exclusion dirs into the new _exclusion_array
+	declare -a _exclusion_array
+	for i in "${_tmp_array[@]}"; do
+		_exclusion_array=("${_exclusion_array[@]}" " --exclude $i");
+	done
+	# Remove files that are in the way.
+	echo -e "\nRemoving files from ${_full_dest_path}, but excluding the following: ${_exclusion_array[@]}\n" | tee -a ${_migration_log};
+	length=${#_full_dest_path}
+	last_char=${_full_dest_path:length-1:1}
+	[[ $last_char != "/" ]] && _full_dest_path="$_full_dest_path/"; :
+	mkdir ${_tmp_dir}; rsync -av --delete ${_exclusion_array[@]} "${_tmp_dir}" "${_full_dest_path}";
+	if [[ $? -ne 0 ]]; then
+		rm -rf ${_tmp_dir}
+		echo -e "\nRemoving files failed." | tee -a ${_migration_log}
+		rmScript
+		exit 101
+	else
+		rm -rf ${_tmp_dir}
+		echo -e "Done removing files." | tee -a ${_migration_log};
+	fi
+
+	if [[ ! $_moveinstead ]]; then
+		# Log the move details
+		echo -e "Copying files from ${_full_src_path} to ${_full_dest_path}\n" | tee -a ${_migration_log};
+		# Headless mode does not need to display progress to the user
+		if [[ $_headless == true ]]; then
+			rsync -az --delete ${_exclusion_array[@]} --exclude 'osmosis' "${_full_src_path}"/{*,.[^.]*} "${_full_dest_path}/" &>>${_migration_log}; errorCheckFatal
+			echo -e "\nFiles copied into place." | tee -a ${_migration_log}
+		else
+			# Rsync files into place and delete anything that should not be there with the exception of excluded directories
+			rsync -az --delete ${_exclusion_array[@]} --exclude 'osmosis' "${_full_src_path}"/{*,.[^.]*} "${_full_dest_path}/" &>>${_migration_log} &
+			PIDrsync=$!
+			while [[ -d /proc/$PIDrsync ]]
+				do
+					_destspace_kbyte=$(du -s "${_full_dest_path}" 2>/dev/null | awk '{print $1}')
+					_destspace_mbyte=$((_destspace_kbyte / 1000))
+				if [[ "$_disk_needed_mbyte" -gt $_destspace_mbyte ]]; then
+					_togo=$((_disk_needed_mbyte-_destspace_mbyte))
+					echo -ne "Still Working $_togo MB to go \r"
+					sleep 5
+				fi
+			done
+			wait $PIDrsync
+			rsyncExitCode=$?
+			if [[ ${rsyncExitCode} -ne 0 ]]; then
+				echo -e "Moving files into place failed." | tee -a ${_migration_log};
+				while true; do
+					echo
+					read -p "Would you like to continue? " yn;
+					case $yn in
+						[Yy]* ) break;;
+						[Nn]* ) echo -e "\nUser chose to exit after error." >> ${_migration_log}; rmScript; exit 101;;
+						* ) echo "Please answer yes or no.";;
+					esac
+				done
+			else
+				echo -e "\nFiles copied into place." | tee -a ${_migration_log}
+			fi
+		fi
+	else
+		# Log the move details
+		echo -e "Moving files from ${_full_src_path} to ${_full_dest_path}\n" | tee -a ${_migration_log};
+		# Rsync files into place and delete anything that should not be there with the exception of excluded directories
+		mv "${_full_src_path}"/{*,.[^.]*} "${_full_dest_path}/" 2>/dev/null; errorCheckFatal
+		echo -e "\nFile move complete." | tee -a ${_migration_log}
+	fi
+	cd "${_full_dest_path}";
+	echo -e "\nCorrecting file ownership and permissions..." | tee -a ${_migration_log}
+	case $panel in
+         cpanel ) find ${_full_dest_path} -type f -name .listing -delete && chown -R ${_username}:${_username} ${_full_dest_path} && chown ${_username}:nobody /home/${_username}/public_html;;
+         plesk ) find ${_full_dest_path} -type f -name .listing -delete && chown -R ${_username}:psacln ${_full_dest_path} && chown ${_username}:psaserv ${_full_dest_path};;
+		 grid ) find ${_full_dest_path} -type f -name .listing -delete && chown -R ${_username}:${_username} ${_full_dest_path} && chown ${_username}:${_username} ${_full_dest_path};;
+         * ) echo "Unable to change ownerships as this is not cPanel or Plesk or Grid"
+    esac
+	find ${_full_dest_path} -type f -exec chmod 644 {} \; && find ${_full_dest_path} -type d -exec chmod 755 {} \;
+	echo -e "Ownership and permissions set. \n" | tee -a ${_migration_log};
+	_connectors=$(grep -PrI '(mysql(i)?_(p)?connect\s?\(|=\s?new PDO|=\s?new mysqli)' ./*  2> /dev/null)
+	if [[ ${_connectors} ]]; then
+		searchConf; #x function updated for headless
+		if [[ ${_connectors} == *"mysql_connect"* ]]; then
+			phpver;#x function updated for headless
+		fi
+	else
+		echo -e "It does not appear this site uses a MySQL database.\n" | tee -a ${_migration_log};
+	fi
+  #Call function to rename index.* files.
+  renameIndex;#x function updated for headless
+
+}
+
+
+# Rename unnecessary index.*. Only 1 index.* will be kept and others will be renamed so it's not used as default page. Priority index.php > index.html > index.htm
+function renameIndex(){
+    _index_count=`find ${_full_dest_path} -maxdepth 1 -name "index*.*"  | wc -l`
+    if [[ ${_index_count} == 1 ]]; then
+        echo -e "\nOnly 1 index file found in destination Document Root. No renaming of index file was needed." | tee -a ${_migration_log}
+    elif [[ ${_index_count} > 1 && -f ${_full_dest_path}/index.php ]]; then   # index.php will be untouched. index.htm* will be renamed to be off.
+      for _i in $(find ${_full_dest_path} -maxdepth 1 -name "index.h*")
+          do
+          _idir=$(dirname "$_i")   # ex: /home/user/public_html
+                _ifilename="$(basename "$_i")"   # ex: index.htm
+                _ifilename_noext="${_ifilename%.*}"  # ex: index
+                _iextension="${_ifilename##*.}"    # ex: .htm
+          mv ${_i} ${_idir}/${_ifilename_noext}-`date +%F--%H-%M-%S`.${_iextension}
+                echo -e "Renamed ${_i} to ${_idir}/${_ifilename_noext}-`date +%F--%H-%M-%S`.${_iextension}. \n" | tee -a ${_migration_log}
+        done
+    elif [[ ${_index_count} > 1 && -f ${_full_dest_path}/index.html ]]; then   # index.html will be untouched. index.htm will be renamed to be off.
+        for _i in $(find ${_full_dest_path} -maxdepth 1 -name "index.htm")
+            do
+                _idir=$(dirname "$_i")   # ex: /home/user/public_html
+                _ifilename="$(basename "$_i")"   # ex: index.htm
+                _ifilename_noext="${_ifilename%.*}"  # ex: index
+                _iextension="${_ifilename##*.}"   # ex: .htm
+                mv ${_i} ${_idir}/${_ifilename_noext}-`date +%F--%H-%M-%S`.${_iextension}
+                echo -e "Renamed ${_i} to ${_idir}/${_ifilename_noext}-`date +%F--%H-%M-%S`.${_iextension}. \n" | tee -a ${_migration_log}
+        done
+    fi
+}
+
+
+# Check the paths assigned from the command line as arguments
+function checkDestFiles(){
+	mkdir -p ${_ct_dir}/${_dom_dir}/backup_files
+	mkdir -p ${_ct_dir}/${_dom_dir}/db
+	echo -e "Checking destination directory for files:\n${_dom_dir}" | tee -a ${_migration_log};
+	if [[ $(find ${_full_dest_path}/ -mindepth 1 \( -type d -o -type f \) ) > 0 && -z "${_force}" ]]; then
+		_timestamp=$(date +%F-%H%M%S)
+		echo -e "\nFiles located. Backing up files into ${_ct_dir}/${_dom_dir}/backup_files/${_dom_dir}_${_timestamp}.tgz\n" | tee -a ${_migration_log};
+		if [[ $_headless == true ]]
+			then tar -czf ${_ct_dir}/${_dom_dir}/backup_files/${_dom_dir}_${_timestamp}.tgz ${_full_dest_path};
+			errorCheckFatal;
+			echo -e "\nHEADLESS MODE: Done backing up files.\n" | tee -a ${_migration_log};
+		else
+			tar -czvf ${_ct_dir}/${_dom_dir}/backup_files/${_dom_dir}_${_timestamp}.tgz ${_full_dest_path};
+			errorCheckOption;
+		fi
+		moveFiles ;#x checked function, no reads. inits more functions that will need to be checked
+	else
+		moveFiles ;#x checked function, no reads. inits more functions that will need to be checked
+	fi
+}
+
+# Check input and validate
+function checkDirs(){
+	if [[ -d "$_src_dir" ]]; then
+		_full_src_path=$(cd "${_src_dir}"; pwd);
+		if [[ -d "$_dest_dir" ]]; then
+			_full_dest_path=$(cd "${_dest_dir}"; pwd);
+			if [[ "${_full_dest_path}" != *public_html* ]] && [[ "${_full_dest_path}" != *httpdocs* ]] && [[ "${_full_dest_path}" != *public_html* ]] && [[ "${_full_dest_path}" != *html* ]];
+				then
+					#echo "Your destination path ${_full_dest_path} does not contain public_html, httpdocs, or html! Bye Felicia!"
+					if [[ $_headless == true ]]
+						then
+							echo "Headless mode and destination directory may be incorrect. Forcing fail."
+							exit 103
+					else
+						while true; do
+							echo
+							read -p "Your destination path ${_full_dest_path} does not contain public_html, httpdocs, or html! Are you POSITIVE you have this set correctly? (y/n) " yn;
+							case $yn in
+								[Yy]* ) break;;
+								[Nn]* ) exit;;
+								* ) echo "Please answer yes or no.";;
+							esac
+						done
+					fi
+					#exit
+			fi
+			setVars ;#x function updated for headless
+			if [[ ${_debug_mode} == true ]];
+				then
+				debug
+			fi
+			LOGNAME=`logname 2>/dev/null`
+			if [[ -z $LOGNAME ]] || [[ $LOGNAME == 'root' ]]; then
+				if [[ $_headless == true ]]
+				then
+					LOGNAME="SNOW Automation"
+				else
+					if [[ $host != 'mt' ]]; then
+						read -p "Unable to determine username. What is your username? " LOGNAME;
+					else
+						LOGNAME="(mt) Agent Unknown"
+					fi
+				fi
+			fi
+			echo -e "\n################ OSMOSIS Being Run by $LOGNAME ################\n" | tee -a ${_migration_log};
+			echo -e "\n################ START MIGRATION ################\n" | tee -a ${_migration_log};
+			checkDestFiles ;#x checked function, no reads. inits more functions that will need to be checked
+		else
+			echo -e "\nUnable to locate the destination directory.";
+			exit;
+		fi
+	else
+		echo -e "\nUnable to locate the source directory."
+		exit;
+	fi
+}
+
+function sapDb(){
+  if [[ -z $_new_db_host ]]; then _new_db_host="localhost"; fi
+  if [[ $_headless == true ]]
+  then
+    echo "Headless mode, skipping search and replace operation on database."
+  else
+    if [[ ! ${_oldPath} ]]
+    then
+      if [[ "${_cms}" == "wordpress" ]]
+      then
+        _oldPath=$(mysql -h ${_new_db_host} -u ${_new_db_user} -p${_new_db_pass} ${_new_db_name} -Nse "select option_value from $(awk -F\' '/table_prefix/ {print $2}' wp-config.php )options where option_name='recently_edited';" | awk -F\" '{print $2}' | awk -F"/wp-content" '{print $1}');
+        _newPath=${_conf_path}
+      elif [[ ${_conf_file} == *"configuration.php"* ]]
+      then
+        _oldPath=$(grep '$log_path' ${_conf_path}/${_conf_file} | awk -F\' '{print $2}' |  awk -F"/logs" '{print $1}')
+        _newPath=${_conf_path}
+      elif [[ "${_cms}" == "zencart" ]]
+      then
+        _oldPath=$(grep "define('DIR_FS_CATALOG" ${_conf_path}/${_conf_file} | awk -F\' '{print $4}' | sed 's/\/$//')
+        _newPath=$(echo ${_conf_path} | sed 's/\/includes//')
+      elif [[ "${_cms}" == "opencart" ]]
+      then
+        _oldPath=$(grep "define('DIR_CATALOG" ${_conf_path}/${_conf_file} | awk -F\' '{print $4}' | sed 's/\/$//' | sed 's/\/catalog//')
+        _newPath=${_conf_path}
+      else read -p "What is the document root from the source server? " _oldPath;
+      fi
+    fi
+    if [[ ${_oldPath} ]]
+    then
+      while true; do
+        echo
+        read -p "Would you like to replace ${_oldPath} with ${_newPath} in the database? (y/n or c to change paths) " yn;
+        case $yn in
+          [Yy]* ) echo -e "Replacing ${_oldPath} with ${_newPath} in the database. \n" | tee -a ${_migration_log};
+          if ! type "git" > /dev/null; then
+            wget --no-check-certificate -O master.tar.gz https://github.com/interconnectit/Search-Replace-DB/archive/master.tar.gz && tar -xzf master.tar.gz && php Search-Replace-DB-master/srdb.cli.php -h ${_new_db_host} -n ${_new_db_name} -u ${_new_db_user} -p ${_new_db_pass} -s ${_oldPath} -r ${_newPath} ; rm -rf Search-Replace-DB-master ; rm -f master.tar.gz;
+          else
+            git clone https://github.com/interconnectit/Search-Replace-DB.git && php Search-Replace-DB/srdb.cli.php -h ${_new_db_host} -n ${_new_db_name} -u ${_new_db_user} -p ${_new_db_pass} -s ${_oldPath} -r ${_newPath} ; rm -rf Search-Replace-DB;
+          fi
+          break;;
+          [Nn]* ) break;;
+          [Cc]* )
+          read -p "Enter the old path: " _oldPath
+          read -p "Enter the new path: " _newPath;;
+          * ) echo "Please enter (y) for yes, (n) for no, or (c) for change.";;
+        esac
+      done
+    else
+      while true; do
+        echo
+        read -p "No path set, would you like to set a path to replace with ${_conf_path} in the database? (y/n) " yn;
+        case $yn in
+          [Yy]* ) read -p "What is the document root from the source server? " _oldPath;
+          sapDb
+          break;;
+          [Nn]* ) break;;
+          * ) echo "Please answer yes or no.";;
+        esac
+      done
+    fi
+  fi
+}
+
+function sedFiles(){
+  if [[ $_headless == true ]]; then
+    if [[ ${_oldPath} ]]; then
+      echo -e "Headless mode, force replacing ${_oldPath} with ${_conf_path} in the files\\n" | tee -a ${_migration_log};
+      find "${_newPath}" -maxdepth 13 -type f | while read -r x; do
+        grep -F -q "${_oldPath}" "$x" && sed -i.CloudTech_bak "s%${_oldPath}%${_newPath}%g" "$x";
+      done
+    else
+      echo -e "Headless mode, previous hosts home directory path not detected, skipping replacement of absolute path in config files.\\n"
+    fi
+  else
+    if [[ ${_oldPath} ]]; then
+      echo
+      while true; do
+        read -rp "Would you like to replace ${_oldPath} with ${_newPath} in the files? (y/n or c to change paths) " yn;
+        case $yn in
+        [Yy]* ) echo -e "Replacing ${_oldPath} with ${_conf_path} in the files\\n" | tee -a ${_migration_log};
+          find "${_newPath}" -maxdepth 13 -type f | while read -r x; do
+          grep -F -q "${_oldPath}" "$x" && sed -i.CloudTech_bak "s%${_oldPath}%${_newPath}%g" "$x";
+          done
+          break;;
+        [Nn]* ) break;;
+        [Cc]* )
+          read -rp "Enter the old path: " _oldPath
+          read -rp "Enter the new path: " _newPath;;
+        * ) echo "Please enter (y) for yes, (n) for no, or (c) for change.";;
+        esac
+      done
+    else
+      while true; do
+        echo
+        read -rp "No path set, would you like to set a path to replace with ${_newPath} in the files? (y/n) " yn;
+        case $yn in
+          [Yy]* ) read -rp "What is the document root from the source server? " _oldPath;
+            sedFiles
+            break;;
+          [Nn]* ) break;;
+          * ) echo "Please answer yes or no.";;
+          esac
+      done
+    fi
+  fi
+}
+
+# Function to determine if the database should be SAP'd
+function doSAP(){
+    if [[ "${_old_dbhost}" == "abcxyz" ]]; then
+        echo -e "\nThe database host was left empty, so no need to SAP.";
+    else
+        sapDb;
+        sedFiles;
+    fi
+}
+
+function homeUrl(){
+	if [[ "${_source_domain}" != "${_destination_domain}" ]]
+		then
+			if [[ $_headless == true ]]
+				then
+					echo "Headless mode, forcing homeUrl and siteUrl to match ${_destination_domain}."
+					_home_url=${_destination_domain};
+					_site_url=${_destination_domain};
+				else
+					while true; do
+					if [[ "$panel" == "grid" ]]; then
+						read -p "Would you like to set ${_gridurl} as your HOMEURL? (y/n/o) " yn;
+					else
+						read -p "Would you like to set ${_destination_domain} as your HOMEURL? (y/n/o) " yn;
+					fi
+						case $yn in
+							[Yy]* ) _home_url=${_destination_domain};
+							break;;
+							[Oo]* ) read -p "What would you like to be your HOMEURL? " _home_url;
+							break;;
+							[Nn]* ) break;;
+							* ) echo "Please answer yes or no.";;
+						esac
+					done
+					if [[ ${_home_url} ]]
+						then
+							while true; do
+								if [[ "$panel" == "grid" ]]; then
+									read -p "Would you like to set ${_gridurl} as your SITEURL? (y/n/o) " yn;
+								else
+									read -p "Would you like to set ${_destination_domain} as your SITEURL? (y/n/o) " yn;
+								fi
+								case $yn in
+									[Yy]* ) _site_url=${_destination_domain};
+									break;;
+									[Oo]* ) read -p "What would you like to be your SITEURL? " _site_url;
+									break;;
+									[Nn]* ) break;;
+									* ) echo "Please answer yes or no.";;
+								esac
+							done
+					fi
+					if [[ ${_home_url} ]]
+						then
+							echo -e "\nUpdating home and site URL.\n\n" | tee -a ${_migration_log};
+							sed -i -e '/HOME/s/^/#/' ${_conf_path}/${_conf_file}
+							sed -i -e '/SITEURL/s/^/#/' ${_conf_path}/${_conf_file}
+							sed -i "/?php/a/** CloudTech (Remove These Lines) */;" ${_conf_path}/${_conf_file}
+							if [[ "$panel" == "grid" ]]; then
+								sed -i "/CloudTech/adefine('WP_HOME','http://"${_gridurl}"');" ${_conf_path}/${_conf_file}
+								sed -i "/CloudTech/adefine('WP_SITEURL','http://"${_gridurl}"');" ${_conf_path}/${_conf_file}
+							else
+								sed -i "/CloudTech/adefine('WP_HOME','http://"${_home_url}"');" ${_conf_path}/${_conf_file}
+								sed -i "/CloudTech/adefine('WP_SITEURL','http://"${_site_url}"');" ${_conf_path}/${_conf_file}
+							fi
+						else echo -e "\nHOMEURL not set, going on.\n\n" | tee -a ${_migration_log};
+					fi
+				fi
+	fi
+}
+
+function prestashopUrl(){
+	if [[ "${_source_domain}" != "${_destination_domain}" ]]
+		then
+			if [[ $_headless == true ]]
+				then
+						echo "Headless mode, forcing live_site to be set to ${_destination_domain}"
+						_live_site=${_destination_domain};
+					else
+						while true; do
+						read -p "Would you like to set ${_destination_domain} as your URL? (y/n/o) " yn;
+							case $yn in
+								[Yy]* ) _home_url=${_destination_domain};
+								break;;
+								[Oo]* ) read -p "What would you like to be your URL? " _home_url;
+								break;;
+								[Nn]* ) break;;
+								* ) echo "Please answer yes or no.";;
+							esac
+						done
+					fi
+			if [[ ${_home_url} ]]
+				then
+					mysql -h ${_new_dbhost} -P ${_db_port} -u ${_db_user} -p${_db_pass} ${_db_name} -e"update ${_db_name}.ps_shop_url set domain='${_destination_domain}', domain_ssl='${_destination_domain}'";
+					_prestaurl_set=true
+			fi
+	fi
+}
+
+function liveSite(){
+	if [[ "${_source_domain}" != "${_destination_domain}" ]]
+		then
+			if [[ $_headless == true ]]
+				then
+					echo "Headless mode, forcing live_site to be set to ${_destination_domain}"
+					_live_site=${_destination_domain};
+				else
+					while true; do
+					read -p "Would you like to set ${_destination_domain} as your live_site? (y/n/o) " yn;
+						case $yn in
+							[Yy]* ) _live_site=${_destination_domain};
+							break;;
+							[Oo]* ) read -p "What would you like to be your live_site? " _live_site;
+							break;;
+							[Nn]* ) break;;
+							* ) echo "Please answer yes or no.";;
+						esac
+					done
+				fi
+			if [[ ${_live_site} ]]
+				then
+					echo -e "\nUpdating live_site.\n\n" | tee -a ${_migration_log};
+					sed -i -e '/live_site/s/^/#/' ${_conf_path}/${_conf_file}
+					# # Joomla uses var $live_site= & public $live_site=# #
+					sed -i "/live_site/a\ \ \ \ public \$live_site='${_live_site}';" ${_conf_path}/${_conf_file}
+				else echo -e "\nlive_site not set, going on.\n\n" | tee -a ${_migration_log};
+			fi
+
+	fi
+}
+
+function cleanup(){
+	echo -e "\nDisable extension dir in ${_home}/public_html/php.ini." | tee -a ${_migration_log};
+	sed -i -e '/extension_dir/s/^/;/' ${_home}/public_html/php.ini 2>/dev/null;
+	echo -e "Disable AddHander and AddType ${_home} recursively.\n" | tee -a ${_migration_log};
+	find ${_home} -maxdepth 6 -type f -name .htaccess -exec sed -i -e '/AddHandler*.php/s/^/#/' {} \;
+	find ${_home} -maxdepth 6 -type f -name .htaccess -exec sed -i -e '/AddType*php/s/^/#/' {} \;
+	if [[ $_headless == true ]]
+		then
+			echo "Headless mode, forcing ${_files_dir} deletion in 30 days."| tee -a ${_migration_log};
+			if [[ ${_files_dir}=*CloudTech* ]]; then
+				echo "rm -rf ${_files_dir}" | at now + 30 days 2>&1 | tee -a ${_migration_log}
+			fi
+	else
+		while true; do
+			read -p "Would you like to schedule ${_files_dir} for deletion in 30 days? (y/n) " yn;
+				case $yn in
+					[Yy]* ) if [[ $host = "mt" ]]; then
+								echo "Well you are on (mt) so...ya cant...yet..."
+							else
+								echo -e "The directory ${_files_dir} will be removed in 30 days.\n" | tee -a ${_migration_log};
+								if [[ ${_files_dir}=*CloudTech* ]]; then
+									echo "rm -rf ${_files_dir}" | at now + 30 days 2>&1 | tee -a ${_migration_log}
+								fi
+							fi
+							break;;
+					[Nn]* ) break;;
+					* ) echo "Please answer yes or no.";;
+				esac
+		done
+	fi
+}
+function completionSnip(){
+	case $host in
+		mt ) if [[ "$panel" == "grid" ]];
+				then
+					completionSnipMTGS;
+				else
+					completionSnipMT;
+				fi;;
+		gd ) completionSnipGD;;
+		* ) echo "Uh Oh Its Not Media Temple or GoDaddy"
+	esac
+}
+function completionSnipGD(){
+	local _dns_live="It appears that you already have the domain pointed to the destination server, so you can test the migrated site out by visiting: http://${_destination_domain}\n"
+	local _host_file="You can test it out by editing your hosts file. Once you are ready to make the switch live, you will just need to remove the below entry from your hosts file.\n\n${_host_ip} ${_destination_domain} www.${_destination_domain}\n\nHost file paths for popular operating systems: \n\tMac: /private/etc/hosts\n\tWindows: C:\\\windows\\\system32\\\drivers\\\etc\\\hosts\n\nFor instructions on how to update your hosts file, please visit https://www.godaddy.com/help/preview-your-website-using-host-files-3354."
+	local _wp_move="You will need to remove ${_source_domain} from your original hosting account and rename ${_destination_domain} to ${_source_domain}.\n\nAt this point, DNS for the domain/subdomain can be pointed over to your new IP address. The easiest method is to update your current DNS zone files A records for ${_source_domain} address to point to ${_host_ip}.\n\nDue to the way that WordPress works, we have placed the following entry into your wp-config.php file for previewing purposes:\n\n '/** CloudTech (Remove These Lines) **/'\n define('WP_HOME','http://${_home_url}')\n define('WP_SITEURL','http://${_site_url}')\n\nPlease remove the aforementioned entry when you are finalizing the site move in order to ensure that visitors are not sent to the temporary domain used for previewing.\n"
+	local _non_wp="You will need to remove ${_source_domain} from your original hosting account and rename ${_destination_domain} to ${_source_domain}.\n\nAt this point, DNS for the domain/subdomain can be pointed over to your new IP address. The easiest method is to update your current DNS zone files A records for ${_source_domain} IP address to point to ${_host_ip}.\n"
+	local _prestashop="In order to make PrestaShop work with a temporary URL the ps_shop_url table in the database had to be updated. If you wish to go back to ${_source_domain} you will need to update that table to set domain and domain_ssl back to ${_source_domain}.\n\n${_non_wp}"
+	local _phpverchange="It was found that your application was not compatible with the version of PHP set within cPanel. In order to have your application work in the new server environment the PHP handler had to be updated to ${_setnewphpver}. This can be reviewed by following the steps found at https://www.godaddy.com/help/view-or-change-your-php-version-16090\n"
+	echo "Change IRIS summary to:"
+	echo "Managed Services - ${_source_domain}: Migration Complete"
+	echo
+	echo "################ START COMPLETION SNIP ################" | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	echo "We have completed your migration!" | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	echo "Please review the rest of this email for any remaining steps you may need to do. If you would like to share your experience regarding this migration afterwards, Click Here: https://www.surveymonkey.com/r/F38PWC2" | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	if [[ "${_source_domain}" == "${_destination_domain}" ]] && [[ "${_live__dest_ip}" == "${_host_ip}" ]]
+		then
+			echo -e ${_dns_live} | tee -a ${_migration_log};
+			echo | tee -a ${_migration_log};
+	fi
+	if [[ "${_live__dest_ip}" != "${_host_ip}" ]]
+		then
+		echo -e ${_host_file} | tee -a ${_migration_log};
+		echo | tee -a ${_migration_log};
+	fi
+	if [[ "${_source_domain}" != "${_destination_domain}" ]]
+		then
+			if [[ ${_cms} == "wordpress" ]]
+				then
+				echo -e ${_wp_move} | tee -a ${_migration_log};
+			elif [[ ${_cms} == "prestashop" ]]
+				then
+				echo -e ${_prestashop} | tee -a ${_migration_log};
+			else
+				echo -e ${_non_wp} | tee -a ${_migration_log};
+			fi
+	fi
+	echo -e "PLEASE NOTE: Failure to update DNS may result in viewers viewing the old website with old content. If your DNS has not been updated and you continue to make changes to your website, these changes will not carry over to your new service." | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	if [[ ${_setnewphpver} ]]; then
+		echo -e ${_phpverchange} | tee -a ${_migration_log};
+	fi
+	echo "Please contact us right away if you notice any issues with this migration. Please keep in mind that we will be unable to troubleshoot or provide assistance with issues that arise after 14 days from the migration completion date." | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	echo "################ END COMPLETION SNIP ################" | tee -a ${_migration_log};
+}
+
+function completionSnipMT(){
+	local _dns_live="It appears that the DNS for the domain has already been pointed to your new server's IP address, so you can test it out by navigating to the following URL:\n\n
+	http://${_destination_domain}"
+	local _host_file="You can test it out by editing your hosts file. Once you are ready to make the switch live, you will just need to remove the below entry from your hosts file.
+	\n\n
+Below is/are the line(s) you need to add:
+	\n\n
+	${_host_ip} ${_destination_domain} www.${_destination_domain}
+	\n\n
+Our Community article at https://mediatemple.net/community/products/dv/204643190 will show you how to preview your domain before DNS is pointed to your (mt) service.
+\n\n
+Once you are ready to make the switch live, you will just need to remove the above preview line(s) and point DNS for the domain to your (dv) Dedicated-Virtual Server IP, ${_host_ip}. The easiest method to point DNS to (mt) Media Temple is to change your name servers to ns1.mediatemple.net and ns2.mediatemple.net via your registrar.
+\n\n
+	PLEASE NOTE: Failure to update DNS may result in viewers viewing the old website with old content. If your DNS has not been updated and you continue to make changes to your website, these changes will not carry over to your new service.
+\n\n
+	Please contact us right away if you notice any issues with this migration. Please keep in mind that (mt) Media Temple will be unable to troubleshoot or provide assistance with issues that arise after 14 days from the migration completion date.
+\n\n
+	If you require any further assistance, please do not hesitate to contact us by replying to this support request, or by calling us at 877-578-4000. We are here 24/7 to assist you. Thank you for continuing to use (mt) Media Temple for your hosting needs."
+	echo
+	echo "################ START COMPLETION SNIP ################" | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	echo "We have completed your migration!" | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	if [[ "${_source_domain}" == "${_destination_domain}" ]] && [[ "${_live__dest_ip}" == "${_host_ip}" ]]
+		then
+			echo -e ${_dns_live} | tee -a ${_migration_log};
+			echo | tee -a ${_migration_log};
+	fi
+	if [[ "${_live__dest_ip}" != "${_host_ip}" ]]
+		then
+		echo -e ${_host_file} | tee -a ${_migration_log};
+		echo | tee -a ${_migration_log};
+	fi
+	echo
+	echo "################ END COMPLETION SNIP ################"
+}
+
+function completionSnipMTGS(){
+	local _dns_live="It appears that the DNS for the domain has already been pointed to your new server's IP address, so you can test it out by navigating to the following URL:\n\n
+	http://${_destination_domain}"
+	local _host_file="We have completed your Move a Site migration(s)! You can test it out at the following special preview URL(s):
+	\n\n
+	http://${_gridurl}"
+	local _wp_move="Most of the links on your root domain are not URL-dependent, so this site will work normally in preview mode or once DNS has been pointed. Since WordPress is URL-dependent, this preview functionality is enabled with the following lines in your "wp-config.php" file:
+	\n\n
+	// Added by (mt) - please remove before launching site\n
+	define('WP_HOME','http://${_gridurl}');\n
+	define('WP_SITEURL','http://${_gridurl}');\n
+	// End added by (mt)
+	\n\n
+	Please remove the aforementioned entry when you are finalizing the site move in order to ensure that visitors are not sent to the subdomain used for previewing.\n"
+	local _close="Once you are ready to make the switch live, you will just need to remove the above preview lines or we can remove them, upon request and point DNS for the domain to your GRID. The easiest method to point DNS to (mt) Media Temple is to change your name servers to ns1.mediatemple.net and ns2.mediatemple.net via your registrar. Please keep in mind that in doing so, your domain will then be utilizing the DNS zone file on (mt) Media Temple nameservers. Accordingly, you will want to create any custom records you might need prior to switching DNS.
+\n\n
+	How can I change the DNS records for my domain?
+\n\n
+	https://mediatemple.net/community/products/grid/204403794
+\n\n
+	You will also want to recreate your email users (and migrate email if necessary) prior to switching DNS if you are planning on hosting email on your GRID.
+\n\n
+	Creating a POP/IMAP email account
+\n\n
+	https://mediatemple.net/community/products/grid/204643680
+\n\n
+	How do I migrate email between servers using IMAP?
+\n\n
+	https://mediatemple.net/community/products/grid/204405444
+	 \n\n
+	PLEASE NOTE: Failure to update DNS may result in viewers viewing the old website with old content. If your DNS has not been updated and you continue to make changes to your website, these changes will not carry over to your new service.
+\n\n
+	Please contact us right away if you notice any issues with this migration. Please keep in mind that (mt) Media Temple will be unable to troubleshoot or provide assistance with issues that arise after 14 days from the migration completion date.
+\n\n
+	If you require any further assistance, please do not hesitate to contact us by replying to this support request, or by calling us at 877-578-4000. We are here 24/7 to assist you. Thank you for continuing to use (mt) Media Temple for your hosting needs."
+	echo
+	echo "################ START COMPLETION SNIP ################" | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	echo "We have completed your migration!" | tee -a ${_migration_log};
+	echo | tee -a ${_migration_log};
+	if [[ "${_source_domain}" == "${_destination_domain}" ]] && [[ "${_live__dest_ip}" == "${_host_ip}" ]]
+		then
+			echo -e ${_dns_live} | tee -a ${_migration_log};
+			echo | tee -a ${_migration_log};
+	fi
+	if [[ "${_live__dest_ip}" != "${_host_ip}" ]]
+		then
+		echo -e ${_host_file} | tee -a ${_migration_log};
+		echo | tee -a ${_migration_log};
+	fi
+
+	if [[ ${_cms} == "wordpress" ]]
+		then
+		echo -e ${_wp_move} | tee -a ${_migration_log};
+		echo -e ${_close} | tee -a ${_migration_log};
+	else
+		echo -e ${_close} | tee -a ${_migration_log};
+	fi
+
+	echo
+	echo "################ END COMPLETION SNIP ################" | tee -a ${_migration_log};
+}
+
+# Show the log file after the migration is complete.
+function showLog(){
+	echo -e "\n################ END MIGRATION ################\n" | tee -a ${_migration_log};
+	if [[ $_headless != true ]]; then
+		printf "showing migration log in ";
+		for num in {3..1}; do
+			printf "%d " "$num";
+			if (( $num == 1 )); then
+				sleep 1;
+				break;
+			fi
+			printf "> "
+			sleep 1;
+		done
+		sed -i '/^$/d' ${_migration_log}
+		clear;
+		less ${_migration_log};
+	fi
+}
+
+# Set up trap/script deletion
+function rmScript(){
+	rm -f /tmp/${_source_domain}.lock
+	rm -f ${_script};
+}
+
+#Enable Lock Functionality to Prevent Multiple people from working on the same migration.
+function check_lock()
+{
+	_full_src_path=$(cd "${_src_dir}"; pwd);
+	case $panel in
+		cpanel ) _dom_dir=$(cd "${_full_src_path}"; pwd | cut -d/ -f5);;
+		plesk ) _dom_dir=$(cd "${_full_src_path}"; pwd | cut -d/ -f5);;
+		grid ) _dom_dir=$(cd "${_full_src_path}"; pwd | cut -d/ -f9);;
+		* ) echo "Uh Oh Its Not Plesk or cPanel or Grid"
+	esac
+	_source_domain="${_dom_dir}"
+	if [[ -f /tmp/${_source_domain}.lock ]]
+    	then
+			if [[ $_headless == true ]]
+				then
+					echo "Headless mode and lock file exists. Forcing fail, manual intervention needed."
+					exit 110
+				else
+		    		echo "The program (osmosis) is currently being run. You must wait until the current session is complete before proceeding. Please try again soon. If you need to remove the lock file it is located at /tmp/${_source_domain}.lock"
+					while true; do
+						read -p "Would you like to remove the lock file and continue? (y/n) " yn;
+						case $yn in
+						  [Yy]* ) rm -f /tmp/${_source_domain}.lock
+							break;;
+						  [Nn]* ) exit
+							break;;
+						  * ) echo "Please answer yes or no.";;
+						esac
+					done
+			fi
+		else
+			touch /tmp/${_source_domain}.lock
+	fi
+}
+
+function phpver()
+{
+	if rpm -qa | grep -q lvemanager; then
+		cur_php_vers=`selectorctl --user-current --user="$_username" | cut -s -f 1`
+		if [[ $cur_php_vers == 7.* ]];
+		then
+			if [[ $_headless == true ]]
+				then
+					echo "Headless mode, PHP version $cur_php_vers does not work with mysql_connect. Needs manual review."
+				else
+					while true; do
+					read -p "PHP is currently set to use $cur_php_vers which is incomptabible with the mysql_connect strings detected within this application, do you want to change the version of PHP this customer is using? Note: This will affect all sites hosted by this customer (y/n) " yn;
+					case $yn in
+						[Yy]* ) change_php_ver
+						break;;
+						[Nn]* )
+						break;;
+						* ) echo "Please answer yes or no.";;
+					esac
+					done
+			fi
+		fi
+	else
+		if [[ $host == 'gd' ]] && [[ $panel == 'cpanel' ]]; then
+			echo "lvemanager not installed, unable to modify php version" | tee -a ${_migration_log};
+			echo "You may want to try installing it by running \"sudo yum install lvemanager\" and then 'selectorctl --version="5.4" --user=\"$_username\"'" | tee -a ${_migration_log}; #ml Why PHP 5.4?
+		fi
+	fi
+}
+
+function change_php_ver()
+{
+	echo "PHP Versions Available:"
+	selectorctl --list | awk ' {print $1} '
+	if [[ $_headless == true ]]
+		then
+				echo "Headless mode, skipping PHP change. Please review and change as needed."
+		else
+			while true; do
+			read -p "Which version would you like to set? (Currently $cur_php_vers) " newphpver;
+			case $newphpver in
+				"5.4" ) selectorctl --set-user-current="5.4" --user="$_username"; _setnewphpver="5.4"; echo "PHP Version Set to 5.4" | tee -a ${_migration_log};
+				break;;
+				"5.5" ) selectorctl --set-user-current="5.5" --user="$_username"; _setnewphpver="5.5"; echo "PHP Version Set to 5.5" | tee -a ${_migration_log};
+				break;;
+				"5.6" ) selectorctl --set-user-current="5.6" --user="$_username"; _setnewphpver="5.6"; echo "PHP Version Set to 5.6" | tee -a ${_migration_log};
+				break;;
+				"7.0" ) selectorctl --set-user-current="7.0" --user="$_username"; _setnewphpver="7.0"; echo "PHP Version Set to 7.0" | tee -a ${_migration_log};
+				break;;
+				"7.1" ) selectorctl --set-user-current="7.1" --user="$_username"; _setnewphpver="7.1"; echo "PHP Version Set to 7.1" | tee -a ${_migration_log};
+				break;;
+				* ) echo "Please answer one of the available options.";;
+			esac
+			done
+		fi
+}
+
+function platform()
+{
+	if [[ $_headless == true ]]
+		then
+			if [[ $plat -eq 4 ]]
+				then
+					host="gd"
+					panel="cpanel"
+					echo "HEADLESS MODE forced platform to $host $panel"
+				else
+					echo "Headless mode only supports GD Cpanel platform (4) for now. Exiting"
+					exit
+			fi
+		else
+
+		echo "1. (mt) Plesk VPS"
+		echo "2. (mt) cPanel VPS"
+		echo "3. (mt) Grid Service"
+		echo "4. GoDaddy cPanel VPS"
+		echo "5. GoDaddy 2GH"
+		echo "6. GoDaddy 4GH"
+		echo "7. GoDaddy Managed Wordpress"
+		echo "8. (mt) Managed Wordpress"
+
+		while true; do
+			if [[ -z "$plat" ]]; then
+				read -p "Which platform are you running this migration on? ($plat) " plat
+			fi
+				case $plat in
+					1 )  panel="plesk"
+							host="mt"
+							echo "You have Selected (mt) Plesk VPS" | tee -a ${_migration_log};
+							break;;
+					2 )  panel="cpanel"
+							host="mt"
+							echo "You have Selected (mt) cPanel VPS" | tee -a ${_migration_log};
+							break;;
+					3 )  panel="grid"
+							host="mt"
+							echo "You have Selected (mt) Grid Service" | tee -a ${_migration_log};
+							break;;
+					4 )  panel="cpanel"
+							host="gd"
+							echo "You have Selected GoDaddy cPanel VPS" | tee -a ${_migration_log};
+							break;;
+					5 )  panel="2gh"
+							host="gd"
+							echo "You have Selected GoDaddy 2GH" | tee -a ${_migration_log};
+							echo "This Option Not Yet Available, Please Move Manually"
+							exit
+							break;;
+					6 )  panel="4gh"
+							host="gd"
+							echo "You have Selected GoDaddy 4GH" | tee -a ${_migration_log};
+							echo "This Option Not Yet Available, Please Move Manually"
+							exit
+							break;;
+					7 )  panel="mwp"
+							host="gd"
+							echo "You have Selected GoDaddy Managed Wordpress" | tee -a ${_migration_log};
+							echo "This Option Not Yet Available, Please Move Manually"
+							exit
+							break;;
+					8 )  panel="mwp"
+							host="mt"
+							echo "You have Selected (mt) Managed Wordpress" | tee -a ${_migration_log};
+							echo "This Option Not Yet Available, Please Move Manually"
+							exit
+							break;;
+					* ) echo "Please answer with one of the options."
+							plat="";;
+				esac
+		done
+	fi
+#echo $host
+#echo $panel
+}
+
+
+trap rmScript SIGINT SIGTERM
+function finish {
+  rm -f /tmp/${_source_domain}.lock
+}
+trap finish EXIT
+# Check if user wanted listing first.
+platform; #x function updated for headless
+check_lock; #x function updated for headless
+listDoms; #x function updated for headless
+checkDirs; #x function updated for headless
+cleanup; #x function updated for headless
+showLog; #x function updated for headless
+completionSnip; #x function updated for headless
+rmScript; #x function updated for headless
