@@ -1,0 +1,513 @@
+---
+matches:
+  1: >
+    [^aws">\/.*\n](data-skycyber4rt|ViRuS\s+OS|FilesMan[^a-zA-Z]|Korang[^,]|www\.fopo\.com\.ar|Gantengers\sCrew|Powered
+        \sby\sKcBl|IRC_cur_socket|Gootkit|c99sh|stuxcrew|aL_Bayragim|dzph\@bk\.ru|<title>\s*Dark\s*Shell\s*<\/title>|Private\s*Shell\s*Mini)
+
+  2: >
+    \$\w+\s*=\s*create_function\(.\$(.\s*\.\s*.)?\w+.\s*,(?<f>\$\w+)\[\d+\]\s*\.
+        (\s*\g{f}\[\d+\]\s*\.){25}
+
+  3: >
+    (?<a>\$GLOBALS\[.\w+.\])\s*=\s*.(\\(x|1)\w+)+.;\s+(\$GLOBALS\[(\g{a}\[\d+\]\s*
+        (\.|\]\s*=|;)\s*)+\s+){5}
+
+  4: >
+    \$default_action\s*=\s*.F(.?\.?.?)*i(.?\.?.?)*l(.?\.?.?)*e(.?\.?.?)*
+        s(.?\.?.?)*M(.?\.?.?)*a(.?\.?.?)*n.;
+
+  5: >
+    function\s+\w+\(\$\w+\)\{\$\w+=Array\((.[\w=]*.\s*\.?\s*){25}
+
+  6: >
+    \s+eval\(\w+\(\$\w+,\s*\$\w+\)\);\?\>$
+
+  7: >
+    (?<a>\$\w+)\s*=\s*[^\n]+?;(\s*\$GLOBALS\[.\w+.\]\s*=\s*(\g{a}\[\d+\](;|\.))+){5}
+
+  8: >
+    (?<a>\$\w+)\s*=\s*[^\n]+?;\$\w+\s*=\s*strto(low|upp)er\((\g{a}\[\d+\](\.|\))){5}
+
+  9: >
+    (?<a>\$\w+)\s*=\s*.\w+.;\s*if\(isset\(\$_REQUEST\[\g{a}\]\)\)\s*\{\s*
+        eval\(\w+\(\$_REQUEST\[\g{a}
+
+  10: >
+     (\$\w+\s*=\s*.(\\(x|1)x\w+){5,}.;\s*){3,}eval(\(\$\w+){4}
+
+  11: >
+    isset\(\$GLOBALS\[.(\\(x|1)\w+){3,}.\]\)\)\s*{\s*\$\w+=strto(low|upp)er\(
+        \$_SERVER\[.(\\(x|1)\w+){3}
+
+  12: >
+    \<\?(php)?\s+eval\(base64_decode\(\S+\);[^\n]+\/\$\w+=urldecode\S+\);\s*
+        \$GLOBALS\[.[0O]+.\]=(\$[O0]+\{\d+\}\.){4,}
+
+  13: >
+    \$login\s*=\s*..;\s+\$pass\s*=\s*..;\s+\$md5_pass\s*=\s*..;\s+eval\(gzinflate\(
+        base64_decode\([^\n]{1000,}
+
+  14: >
+    \<\?(php)?\s+file_put_contents\(.(\.\.\/)+\w+\.php\S*.,base64_decode[^\n]+
+        file_get_contents\(.(\.\.\/)+\w+\.php\S*.\);\s*\?\>
+
+  15: >
+    if\(isset\(\$_GET\[\w+\]\)\)\s*\{(?<a>\$\w+)=[^\n]+base64_decode\(\g{a}\)
+
+  16: >
+    field_id=\S+form_unique_id=[^\n]+(chr\(\d+\)\.?){5,};\s*eval\(\$\w+\(\$_REQUEST
+
+  17: >
+    \<\?(php)?\s+if\s*\(\!isset\((?<a>\$_REQUEST\[.\w+.\])[^\n]+\@preg_replace
+        \(\S+,\s*\@\g{a},\s*\S+\);\s*\?\>
+
+  18: >
+    \s+(?<a>\$\w+)=eval\((chr\(\d+\)\.?)+\);(?<b>\$\w+)=(chr\(\d+\)\.?)+;
+        \g{b}\([^\n]+,\g{a},[^\n]+\);\s*\?\>
+
+  19: >
+    \}=\@str_replace\(\S+,\$_POST\S+\}=\@str_replace\S+=fopen\(\$\{\$
+
+  20: >
+    (?<a>\$\w+)\s*=\s*[^\n]+;\s*eval\(.\?\>.\.gzuncompress\(
+        base64_decode\(\g{a}\)\)\);
+
+  21: >
+    \<\?(php)?\s+\$[0O]+=urldecode[^;]+;\s*(?<a>\$[0O]+)=(\$[0O]+\{\d+\}[\.;])+
+        [^\n]+__FILE__[^\n]+eval\(\g{a}
+
+  22: >
+    \$\w+=__FILE__;\$\w+=\S+;eval\((base64_decode|\$\w+)\(\S+\)\);\?\>
+
+  23: >
+    (?<a>\$\w+)\s*=\s*query_str\(\$_POST\);\s+parse_str\(\g{a}\);\s+((?<b>\$\w+)=
+        lrtrim\(\g{b}\);\s+){10,}
+
+  24: >
+    \<\?(php)?\s+\$redirect=\S+;\s+\?\>\s+\<html\>\<head\>
+
+  25: >
+    \$ip\s*=\s*(getenv|\$_SERVER)..REMOTE_ADDR..;(\n|[^\n])+(?<a>\$\w+)\s*\.?=
+        \s*[^\n]+;\s+(\g{a}[^\n]+_POST[^\n]+\s+){2}([^\n]|\n)+mail\(
+
+  26: >
+    \<\?(php)?(\n|[^\n])+?(?<a>\$\w+)\s*=\s*[^\n]+;\s+(\@\$(?<b>\w+)=
+        \$_POST\[.\g{b}.\];\s+){5,}(\n|[^\n])+mail\(\g{a}
+
+  27: >
+    \<\?(php)?\s+(?<a>\$\w+)\s*=\s*fopen[^\n]+;\s+(?<b>\$\w+)(\n|[^\n])+
+        \@\$REMOTE_ADDR((\n|[^\n])+\$_POST){2}[^\n]+\s+fwrite\(\g{a},\g{b}
+
+  28: >
+    set_time_limit\(\d+\);\s+(\$(?<a>\w+)=\$_REQUEST...\g{a}\w*...;\s+){5,}
+        if\((?<b>\$\w+)[^\n]+\s+\g{b}[^\n]+;\s*\}\s*\?\>
+
+  29: >
+    \]\}=chunk_split\(base64_encode\(\$\{\$\w+\}\)\);\$\{\$\{.[\w\\]+.\}
+        \[.[\w\\]+.\]\}=strto(upp|low)er\(md5\(uniqid\(time\(\)\)\)\);\$\{\$\{
+
+  30: >
+    \<\?\s+session_start..;\s+\$ip\s*=\s*(getenv|\$_SERVER)..REMOTE_ADDR..;\s+
+        (\n|[^\n])+(\$\w+\s*=\s*\$_POST\[.\w+.\];\s+){5,}(\n|[^\n])+mail\(
+
+  31: >
+    \<script\>\s+(window\S+https-\/\/www\.paypal\.com\S+;\s+){3,}\s+\<\/script\>
+
+  32: >
+    \<(?<a>\w+)\>[Nn]ow\s*,\s*you\scan\ssign\sin\sto\sdropbox\swith\s
+        (your\semail|all\semail\sproviders\.)\<\/\g{a}\>
+
+  33: >
+    (href=.https-\/\/chaseonline\.chase\.com[^\n]+){4,}(ChangeEmailAddress|Logon)
+
+  34: >
+    \<\?(php)?\s+eval\((.\?\>.\.)?gzuncompress\(base64_decode\(\S+\)\)\);\s*\?\>
+
+  35: >
+    \<\?(php)?\s+class\s+\w+\s*\{(\n|[^\n])+(?<b>\$\w+)\s*=\s*\@\$_COOKIE..\w+..;\s*
+        [^\n]+\g{b}[^\n]+\s*([^\n]+\g{b}\s*\(\s*\@\$_COOKIE[^\n]+\s+)
+
+  36: >
+    (?<a>\$\w+)\s*=\s*.(\\x\w\w)+.;(?<b>\$\w+)\s*=\s*.(\\x\w\w)+.;(?<c>\$\w+)\s*=
+        \s*.(\\x\w\w)+.;eval\(\g{c}\(\g{a}\(\g{b}\(\$\w+\)\)\)\);\?\>
+
+  37: >
+    \<\?(php)?\s+if\(isset\(\$_GET\[\S+\]\)\)\{echo.\<font\s+color[^\n]+php_uname\(\)
+        [^\n]+getcwd\(\)[^\n]+_POST[^\n]+_FILES[^\n]+\?\>
+
+  38: >
+    \<\?(php)?\s+\/\/\s*Ghost\s+mini\s+JumpingShell
+
+  39: >
+    \$key\s*=\s*\S+;\s+\$url\s*=\s*base64_decode\(\$_GET\[\S+\]\);\s+\$IfConfigIPs\s*=
+        \s*array\(\);\s+\$SocketIPs\s*=\s*array\(\);\s+\$UnixIPs
+
+  40: >
+    \<\?(php)?\s+\$\w+=(\S\.?)+;\s+\$\w+=__FILE__;\s+(\$\w+=\$\w+
+        \((\S\.?)+\);\s+){5,}
+
+  41: >
+    \<\?(php)?\s*(\${"\w?(\\x\d|\w)+"}\s*\["(\\x\d|\w)+"\]="(\\x\d|\w)+";){5,}.*_POST
+
+  42: >
+    \@system\(.(\.\/)?\d+\.sh.\);\s*\@unlink\(.(\.\?)?\d+\.sh.\);\s*\?\>
+
+  43: >
+    \<\?(php)?\s+if\(\!empty\(\$_SERVER\[.HTTP_USER_AGENT.\]([^\n]+\$_POST){10}
+
+  44: >
+    \<\?(php)?\s+\$auth_pass\s*=\s*\S+;\s+(\$\w+\s*=\s*\S+;\s+)*(\$|extract
+        \(array\(.)default_action.?\s*=\>?\s*.FilesMan.(,|;)
+
+  45: >
+    \$default_action\s*=\s*\S+;\s+\$default_use_ajax\s*=\s*true;\s+(\$\w+\s*=\s*\S+;\s+)+
+        \$default_charset\s*=\s*\S+;\s+preg_replace\(.\/\.\*
+
+  46: >
+    \<\?(php)?\s+(?<a>\$\w+)=strrev\(.edoced_46esab.\);(?<b>\$\w+)=\S+;
+        eval\(\g{a}\(\g{b}\)\);
+
+  47: >
+    (?<a>\$\w+)=..;\@\w+\((?<b>\$\w+)\[(?<c>\$\w+)\]\);\g{c}\+\+\)\{if\(\g{c}\<\d+\)
+        \{\$\w+\[\g{b}\[\g{c}\]\]=\g{c};\}else\{\g{a}\.=\@\w+\S+eval\(\g{a}\);
+
+  48: >
+    \<\?(php)?\s+(?<a>\$\w+)\s*=\s*.b\W*a\W*s\W*e\W*6\W*4\W*_
+        \W*d\W*e\W*c\W*o\W*d\W*e.;\s*assert\(\g{a}\(
+
+  49: >
+    \<div\sclass=.title.\>[^\n]+Horux-Mailer\s+\S+\s+Horux.ru
+
+  50: >
+    \<\?(php)?\s+function\shttp_get\((?<a>\$\w+)\)\{\s*(?<b>\$\w+)\s*=
+        \s*curl_init\(\g{a}\);\s*(curl_setopt\(\g{b},[^\n]+;\s*){4}
+
+  51: >
+    \<\?(php)?\s+echo[^\n]+php_uname\(\)[^\n]+\s*echo[^\n]+method=.post.[^\n]+\s*
+        echo[^\n]+id=.(?<a>\w+).[^\n]+\s*if\(\s*\$_POST\[.\g{a}.\] == .upload./ix
+
+  52: >
+    \<\?(php)?\s+(echo \S+;\s*)?(\s*\/\*\**([^\*]|\n)+\*\/\s*)?preg_replace
+        \(.(\\x\w\w)+\S+;\s*\?\>
+
+  53: >
+    if\(isset\(\$_POST\[._.\]\)\s*&&\s*isset\(\$_POST\[.__.\]\)\)\{\$_=
+        \$_POST\[._.\];\$__=\$_POST\[.__.\];\}elseif\(isset
+
+  54: >
+    \<\?(php)?\s+if\s*\(\!isset\(\$_REQUEST\[.(?<a>\w+).\]\)\)[^\n]+\@preg_replace
+        \(.\S+.,\s*\@\$_REQUEST\[.\g{a}.\],\s*..\);\s*\$\w+\s*=\s*
+        \$_SERVER\[.PHP_SELF.\];
+
+  55: >
+    \<\?(php)?\s+error_reporting\(0\);\s*(?<a>\$\w+)\s*=\s*array\([^\n]+;\s*
+        echo[^\n]+;\s*if\(isset\(\$_GET\[.\w+.\][^\n]+\s*shuffle\(\g{a}\);
+
+  56: >
+    if\(isset\(\$_POST\[\S+\]\s*\)\s*\)\{\s*(\$x\w\w=\$_POST\[.\w+.\];\s*){7}
+
+  57: >
+    \<\?(php)?\s+eval\(.(\\x\w\w){10,}\S+\;
+
+  58: >
+    \<\?(php)?\s+if\s*\(\$_GET\[.(?<a>\w+).\]==.\g{a}.\)\s*\{\s*\$\w+\s*=\s*
+         \$_SERVER\[.DOCUMENT_ROOT.\];\s*echo\s*\<\<\<HTML
+
+  59: >
+    \<\?(php)?\s+(\/\/[^\n]+\s+)?error_reporting\(0\);\s*if\(isset\(\$_GET
+        \[.\w+.\]\)\)\s*\{\s*echo[^\n]+php_uname[^\n]+;\s*([^\n]+disable_functions){2}
+
+  60: >
+    \<\?(php)?\s+file_put_contents\([^\)]+\);\s*echo\s*file_get_contents\([^\)]+\);
+        \s*unlink\(__FILE__\);\s*\?\>
+
+  61: >
+    (?<a>\$\w+)=.\w+.;\s*(?<b>\$\w+)=\$_COOKIE\[\g{a}\];\s*(if\(\@empty\(\g{b}\)\)
+        \{\g{b}=\$_(POST|GET)\[\g{a}\];\}\s*){2}
+
+  62: >
+    (?<a>\$\w+)\s*=\s*\@\$_COOKIE[^\n]+;\s+if\s*\(\g{a}\)\s*\{\s+(\$\w+\s*=\s*
+        \g{a}\(\@\$_COOKIE\[.\w+.\]\);\s+){2}\$option
+
+  63: >
+    \<\?(php)?\s+(\$\w+)=.b\W*a\W*s\W*e\W*_*\W*\(*\d+(\*\d+)\)*\W*_*
+        d\W*e\W*c\W*o\W*d\W*e.;\s*\2\s*=\s*\2\((str|preg)_replace\(
+
+  64: >
+    eval\(gzinflate\(base64_decode\(\$?\S+\)\)\);\s*\}?\s*\?\>
+
+  65: >
+    (?<a>\$\w+)=\(.\?\>.\.gzuncompress\(base64_decode\(\S+\)\)\);
+        \@eval\(\g{a}\);\s*\?\>
+
+  66: >
+    \<\?(php)?\s+\$\w+=[^\n]+\.\s(?<a>\s+)[^\n]+\.\s(\g{a}[^\n]+\.\s){5,}
+        \g{a}[^\n]+;$
+
+  67: >
+    \<\?(php)?\s+\$\w+\s*=\s*.\w+.;\s*preg_replace\((.(\\(x|1)?\w\w)+.,?)+\);\s*\?\>
+
+  68: >
+    \<\?(php)?\s+eval\(\s*base64_decode\(\s*\$_POST\[.\w+.\]\)\)\;\s*(\?\>)
+
+  69: >
+    \$\w+\((?<a>\$\w+)\[\d+\]\.(\g{a}\[\d+\]\.?)+,\s*\$\w+\s*,.\d+.\)\;$
+
+  70: >
+    \<\?(php)?\s+(?<a>\$\w+)\s*=\s*.abcdefghijklmnopqrstuvwxyz.;\s+\$\w+\s*=
+        \s*((\g{a}\{\d+\}|._.)(\s\.\s)?){10,}
+
+  71: >
+    ;eval\(\$\{\$\{.((\\(x|1)\w\w)|[GLOBALS])+.\}\[.(\w|\\)+.\]\}\[.\w+.\]\);\}\}
+        \s*\?\>
+
+  72: >
+    =trim\(array_pop\(\$\{\$\{[^\n]+return\$\{\$\{.((\\(x|1)\w\w)|[GLOBALS])+.\}
+        \[.(\w|\\)+.\]\};\}\s*\?\>
+
+  73: >
+    \<\?(php)?\s+\@preg_replace\W+e.\,\s+\@\$\_POST\[.\w+.\]\,\s+.\s*?.\)\;
+
+  74: >
+    \<\?(php)?\s+\@session_start\(\);\s+\@set_time_limit\(0\);\s+if\(\(isset
+        \((?<a>\$\w+)\)\sAND\s\g{a}==0\)\sOR\s\(isset
+
+  75: >
+    \<\?(php)?\s+if\(isset\((?<a>\$_POST\[\S+\])\)\)[^\n]+base64_decode\(
+        \g{a}[^\n]+eval
+
+  76: >
+    \<\?(php)?\s+error_reporting\(0\)\;\s+if\s+\(isset\((?<a>\$\_\w+)
+        \[.(?<b>\w+).\]\)\s+and\s+\g{a}\[.\g{b}.\]\s+\=\=\s+\(.\w+.\)\)\s+\{
+
+  77: >
+    \<\?(php)?\s+(?<a>\$\w+)\s*\=\s*.[^\r\n]+?\g{a}\[\d+\]\,\s+\$\w+\s+\,\s?.\d+.\)
+        \;\s+\?\>
+
+  78: >
+    \<\?(php)?\s+eval\(base64_decode\(.[^\n]+?\?\>
+
+  79: >
+    if\(\!empty(?<a>\(\$_POST\[\$\w+\]\))\sand\sstrlen\g{a}\s*\>\s*0\sand\sisset\g{a}\)
+        \{\s+(?<b>\$\w+)\s*=\s*..\$\w+\s*=\s*true;.;\s+\@eval\(\g{b}\);
+
+  80: >
+    \<\?(php)?\s+if\((?<a>\$_GET\[.\w+.\])\)\{die\(\g{a}\);\}elseif\(\$_POST\[.\w+.\]\)
+        \{(eval\(|base64_decode\(|strrev\(|str_rot13\(){3,}\$_POST\[.\w+.\]\)+;exit;\}
+
+  81: >
+    if\s+\(isset(?<a>\(\$_GET\[.\w+.\]\))\)\s+die\g{a};\s+
+        if\s+\(isset(?<b>\(\$_POST\[.\w+.\]\))\s+&&\s+\!empty\g{b}\)\s+\{\s+
+        (eval\(|base64_decode\(|strrev\(|str_rot13\(){3,}\$_POST\[.\w+.\]\)+;\s*
+        exit(\(\))?;\s*\}
+
+  82: >
+    if\s+\(\s+\$android\s+==\s+true\)\s+\{\s+
+        \$\w+\s*=\s*mt_rand\(0,count\(\$\w+\)-1\);\s+
+        \$\w+\s*=\s*\$\w+\[\$\w+\];\s+\}\s+\?\>
+
+  83: >
+    \<\?(php)?\s+eval\(eval\([^\n\r]+\)\);\s*\?\>
+
+  84: >
+    <\?(php)?\s+\$auth_pass\s*=\s*\S+;.*\$\w+\s*=\s*(\w+\()?base64_decode
+
+  85: >
+    \<\?(php)?\s+\((?<a>\$\w+)\s*=\s*\$_POST\S+\s+&&\s+
+        \@preg_replace\(\S+,\s*\S+\(\g{a}\).,\s+\S+\);\?\>
+
+  86: >
+    \<\?(php)?\s+echo\s+\S+;\s+preg_replace\([^\)]+\);\s+\?\>
+
+  87: >
+    \<\?(php)?\s+\@eval\(\$_POST\[.\w+.\]\);\?\>
+
+  88: >
+    \<\?(php)?\s+(?<a>\$\w+)\s*=\s*\S+;\s+\g{a}\(\$\{
+        \W*_\W*P\W*O\W*S\W*T\W*}\s*\[.\w+.\]\);\s*\?\>
+
+  89: >
+    \<\?(php)?\s+\@\w+\((?<a>\@\w+\(\(\w+\))\$_REQUEST\S+,
+        \g{a}\w*\(?\$_REQUEST\S+,\$_REQUEST\S+\);\s*\?\>
+
+  90: >
+    (?<a>\$\w+)\s*=\s*get_option\(\S+\);\s+
+        \g{a}\s*=\s*base64_decode\(str_rot13\(\g{a}\)\);\s+
+        if\(strpos\(\g{a}
+
+  91: >
+    <\?(php)?\s+(\$\w+)\s+=\s+.\w+[^\r\n]+?=.;[^\w+]
+        (?<b>\$\w+)\s+=\s+(.*);[\s\n\r]+\@(\g{b})[^\n\r]+,
+        \s+..\);
+
+  92: >
+    <\?(php)?\s+\/\*\s+GNU\sGENERAL[\w\W\s]+?\*\/\s*
+        extract\(\$_COOKIE
+
+  93: >
+    <\?(php)?\s+extract\(\$_COOKIE\,\s*\d+\)\;\s+\@
+
+  94: >
+    <\?(php)?\s+\@preg_replace\(\$_SERVER\[.HTTP_X[^\n\r]+;\s+\?>
+
+  95: >
+    <\?(php)?\s+\$\{.(\\\w+)+.\}\[.(\\\w+)+.\]
+
+  96: >
+    \$[\w_]+=isset\(\$_POST\[.[\w_]+.\]\)\?\$_POST\[.[\w_]+.\]\-
+
+  97: >
+    <\?(php)?\s+\@error_reporting\(0\)\;\s*\@ini_set\(chr\(\d+\).chr\(\d+\)
+
+  98: >
+    \$_\w+=.[\\\w]+?.;\s*\$_\w+\(.([\\\w+]|(.,.))+(.\..)\w+
+
+  99: >
+    <\?(php)\s+(?<a>\$\w+)\s*=\s*.str_rot13.;\s+(?<b>\$\w+\s*=\s*\g{a})
+
+  100: >
+    <\?(php)\s+\$\w+\s+=\s+.\w+.\^\s+.[\\\w+]+
+
+  101: >
+    <\?(php)?\s*(\$[\{\(\[]"?\'?[\\\w]+?"?'?[\}\)\]])?\s*
+        ([\{\(\[]"?'?[\w]+?"?'?[\}\)\]])\s*=\s*"?'?((\\x\w\w?)+)?'?"\s*;
+        \s*\$(GLOBALS\W+((GLOBALS)*\3(\W\d+\W+)?)+)+
+
+  102: >
+    <\?(php)?\s*\$\w+\s*=\s*.\w+;\s*(function)\s*\w+\(\$\w+,\s*
+        \$\w+\)\{\$\w+\s*=\s*'';\s*(for)\((\$i=0);\s*\$i\s*<\s*\w+
+        \(\$\w+\);\s*(\$i\+\+)\)\{\$\w+\s*.=\s*(isset)+
+
+  103: >
+    <\?(php)?\s*(function)\s*\w+\(\$\w+,\s*\$\w+\){\$\w+\s*=\s*'';\s*
+        (for)\((\$i=0;)\s*(\$i)\s*<\s*\w+\(\$\w+\);\s*(\$i\+\+)\){\$\w+\s*.=\s*(isset)+
+
+  104: >
+    <\?(php)?\s*\$\w+="\w".(chr)\(\w+\).(chr)\(\w+\)."\\\w+
+        ".(chr)\(\w+\)."\\\w+".(chr)\(\w+\)."+
+
+  105: >
+    if\(isset\(\$_POST\["(\w+)"\]\)\)\s+\$\w+\s*=\s*base64_decode\(\$_POST
+        \["\1"\]\);\s*else\s*\{\s*echo\s+"indata_error";\s*exit;\s*\}\s*
+
+  106: >
+      if\s*\(isset\(\$_COOKIE(\["?'?\w+"?'?\])\)\)\s*\W?\$_COOKIE\["?'?\w+"?'?\]\(\$_COOKIE\1\);?
+
+  107: >
+    <\?(php)?\s*\$\w+\s*=\s*((chr\(\d+\).)+(\/\*\d+\*\/)+)+(chr\(\d+\).)+
+        (chr)\(\d+\);\s*\$\w+\s*=\s*((chr\(\d+\).)+(\/\*\d+\*\/)+)+
+
+  108: >
+    \?\>\s+\<meta http-equiv\=.refresh. content\=.2; url\=\<\?php\s+
+        echo\s+\$\w+;\?\>\s+.\>
+
+  109: >
+    (\$\w+)\s*=\s*("?'?\w+'?"?)?\s*;?\s*\$(\w+)\s*=\s*((\1\[\d+\]\.?;?)\s*)+
+
+  110: >
+    (\$\w+)=\$_COOKIE;?\n(\$\w+)=\1\[\w+\];\nif\(\2\)
+
+  111: >
+    <?php system(base64_decode($_GET['cmd'])); ?>
+
+  112: >
+    \$(hashcode)\s*=\s*'\w+';\s*\$(scripts_dir)(_\w+)*\s*=\s*\d+;\s*\$(scripts_dir)
+        \s*=\s*'(scripts)';\s*(if)\(!(is_dir)\(\$\4\)\)\s*(mkdir)\('\5'\s*,\s*0777+
+
+  113: >
+    \$(hashcode)\s*=\s*'\w+';\s*(if)\(((isset|is_numeric)\(\$_POST\['\w+']\)\s*&&\s*)*
+        (\$_POST\['\w+']\s*==\s*\$hashcode\s*&&\s*)*((isset|is_numeric)\(\$_POST\['\w+']\)\s*&&\s*)*
+
+  114: >
+    (\$\w+)\s*=\s*"(\\x\d+\w*)+";\$\w+\s*=\s*&\$\1;(\$\w+)\s*=\s*(array)\("\w+"\s*=>\s*"\w+
+        (\\x\d+\w*)+",\s*"\w+\d*\w*"\s*=>\s*(@\$\w+\["\w+(\\x\d+\w*)+"],"\w+"\s*=>\s*)?"(\\x\d+\w*)+"+
+
+  115: >
+    \$\w+\s*=\s*\d+;\s*(function)\s*\w+\((\$\w+),\s*(\$\w+)\){\$\w+\s*=\s*'';\s*(for)\((\$i=0);\s*
+        (\$i)\s*<\s*(strlen)\(\2\);\s*(\$i\+\+)\)\{\$\w+\s*.=\s*(isset)\((\3\[\2\[\6]])\)\s*\?\s*\10+
+
+  116: >
+    if\s*\(\s*(\$_POST)\['\w+'\]\s*==\s*"\w+"\s*\)\s*\{\s*(\$\w+)\s*=\s*urlencode\(\1\['\w+'\]\);
+        \s*\2\s*=\s*ereg_replace\("%5C(%22)",\s*"\3",\s*\2\);\s*\2\s*=\s*urldecode\(\2\);
+
+  117: >
+    (\$GLOBALS)\[(['"])(\w+)\2\]\s*(=\s*Array\(\))?(;?\s*)global\s*\$\3(\s*\5)\$\3\s*=\s*
+        \1\5\$\{(['"])(\\x\w{1,3})+\7\}(\[(['"])\w+\10\])\s*=\s*(['"])(\\x\w{1,3})+\11\5\s*
+
+  118: >
+    <\?(php)?\s*for\s*\((\$\w+)\s*=\s*\d,\s*(\$\w+)\s*=\s*'&\\'\s*(\W|_)+\s*\$\w\s*=\s*'';@\w+
+        \(\3\[\2]\);\s*\2\+\+\)\s*{if\(\2<\d+\)\s*{(\$\w)\[\3\[\2]]\s*=\s*\2;}\s*else\{(\$\w+)\s*.=\s*\@chr\(\(\5\[\3\[\2]]+
+
+  119: >
+    <\?(php)?\s*(\#\s*-+\s*Config\s*-+\s*\#\s*)?\$\w+='';\s*(\#\w+\s*\w*\s*)?\$\w+\s*
+        =\s*array\(\);\s*(\#.*\s*)?(\#\s*-+\s*\#\s*)?error_reporting\(\d+\);\s*(\w+\(('?\w+'?|\d+)
+        (,'?\w+'?\s*)*\);\s*)*(if\(\!isset\(\$\w+\)\)\$\w+\s*=\s*&\$\w+;\s*)+
+
+  120: >
+     (\$\w+)\s*=\s*(\$_POST)\['\w+'];\s*if\(\s*\1\s*!=\s*""\s*\)\s*{\s*(\$(message|mensagem))\s*=\s*\2\['\w+'];\s*
+         \$(subject|assunto)\s*=\s*\2\['\w+'];\s*\$(nome|name)\s*=\s*\2\['\w+'];\s*\$(de|from)\s*=\s*\2\['\w+'];\s*
+         (\$(to|para))\s*=\s*\2\['\w+'];\s*\$email\s*=\s*explode\("\\n",\s*\8\);\s*\3\s*=\s*stripslashes\(\3\);\s*
+
+  121: >
+    if \((\$_POST)\["(enviar|send)"]\)\s*{\s*\$\w*mailer\s*=\s*\1\["\w+"];\s*\$(nome|name)\s*=\s*\1\['\3'];\s*
+        \$(remetente|sender)\s*=\s*\1\['\w+'];\s*\$(assunto|subject)\s*=\s*\1\['\w+'];\s*\$html\s*=\s*stripslashes\(\1\['\w+']\);\s*
+        \$email(s)?\s*=\s*\1\['\w+'];\s*\$email(s)?_list(a)?\s*=\s*explode\("\\n",\s*\$\w+\);\s*\$\w*email(s)?\s*=\s*count\(\$\w+\);\s*
+
+  122: >
+    <\?(php)?\s*(\$\w+)\s*=\s*".+";(\$\w+)\s*=\s*(\2\[\d+\](\.)*)+;\s*
+        (\$\w+)\s*=\s*""((\.chr\(\d+\)\.*)|("(\w*(\\x)*\d+\w*)+")|"\w*")+;\s*\$\w+
+
+  123: >
+    if\(isset\(\$_COOKIE\['b374k'\]\)\)
+
+  124: >
+    <\?(php)?\s*\$(O|0)+\s*=\s*urldecode\("(\%(A|B|C|D|E|F|\d)+)+"\);\s*
+        (\$(O|0)+\s*\.*=\s*(\$(O|0)+\{\d+\}\.?)+;)+eval\(\$(O|0)+\("\w+
+
+  125: >
+    \(\s*strstr\s*\((\$\w+)\s*,\s*"(\s*x(\d|[a-f])+\s*\d+)+.+"\s*\)\s*\)
+
+  126: >
+    <\?(php)?\s*if\(\!(function)_(exists)\("(\w+)"\)\)\{\2\s+\4\(\$(\w+)\)\s*\{\$\5=(base64)_(decode)\(\$\5\)
+
+  127: >
+    <\?(php)?\s*\$\w+\s*=\s*(((chr\(\d+\))|("(\()?(\w+)?(\\x\w+)*(;)?"))(\.)?)*(((chr\(\d+\))|
+        ("(\()?(\w+)?\\x\w+"))\.){2}(((chr\(\d+\))|("(\()?(\w+)?(\\x\w+)*(;)?"))(\.)?)*;
+
+  128: >
+    (\["(\w+)?(\\x\w+)+"\]\s*=\s*"(\w+)?(\\x\w+)+"\s*;\s*\$\{"(\w+)?(\\x\w+)+"\}){10}
+
+  129: >
+    <\?php\s+(\$\w+)\s*=\s*\$_COOKIE\s*;\s*(\$\w+)\s*=\s*\1\[\w+\]\s*;\s*if\s*\(\s*\2\s*\)\s*\{\s*(\$\w+)\s*=\s*\2\(\1
+        \[\s*\w+\s*\]\s*\)\s*;\s*(\$\w+)\s*=\s*\2\s*\(\1\s*\[\w+\]\s*\)\s*;\s*(\$\w+)\s*=\s*\3\s*\("",\s*\4\s*\)\s*;\s*\5\(\)\s*;
+
+  130: >
+    <\?php\s+(\$\w+)\s*=\s*('.{50,}'(\.|;)\s*)+\$_(\w+)\s*=\s*create_function\s*\(\s*'(\$\w+)'\s*,\s*\4\s*\(\s*base64_decode
+        \s*\(\s*('.{50,}'(\.|;)\s*)+'.+'\s*\)\s*,\s*\$_COOKIE\s*\[\s*str_replace\s*\(\s*'\.'\s*,\s*'_'\s*,\s*\$_SERVER\[\s*'HTTP_HOST'
+        \s*\]\s*\)\s*\]\s*\)\s*\.\s*';'\s*\)\s*;\s*\$_\4\s*\(\s*\5\s*\)\s*;
+
+  131: >
+    <\?php\s+(\$\w+)\s*=\s*'.+'\s*;\s*(\$\w+)\s*=\s*Array\(\)\s*;\s*(\2\[\]\s*=\s*(\1\[\d+\](\.|;))+)+\s*foreach\s*\(\s*\2\[\d+\]\s*\(\s*\$_COOKIE\s*,
+        \s*\$_POST\s*\)\s+as\s+(\$\w+)\s*=>\s*(\$\w+)\s*\)\s*\{\s*function\s*(\w+)\s*\(\s*\2\s*,\s*\6\s*,\s*(\$\w+)\s*\)\s*\{\s*return
+
+  132: >
+    <\?php\s+(\$\w+)\s*=\s*'.{5000,}\(\.\*\)\s*/\s*epreg_replace\w*\s*'\s*;\s*\$\w+\s*=\s*explode\s*\(\s*chr\s*\(\s*\(\s*\d+\s*\-\s*\d+
+        \s*\)\s*\)\s*,\s*'(\d+,\s*)+\d+\s*'\s*\)\s*;\s*\$\w+\s*=\s*substr\s*\(\1\s*,\s*\(\s*\d+\s*\-\s*\d+\s*\)\s*,\s*\(\s*\d+\s*\-\s*\d+\s*\)\s*
+        \)\s*;\s*if\s+\(\s*\!\s*function_exists
+
+  133: >
+    <\?php\s+ignore_user_abort\(true\)\s*;\s*set_time_limit\(0\)\s*;\s*@ini_set
+        \(\s*'error_log',\s*NULL\s*\)\s*;\s*@ini_set\('log_errors',\s*0\s*\)\s*;
+
+  134: >
+    (\$\w+)\s*=\s*str_replace\(\s*\$\w+,\s*"\w+",\s*\1\);\s*eval\s*\(\s*gzinflate\s*\(\s*base64_decode\(\s*\1\s*\)\s*\)\s*\)\s*;
+
+  135: >
+    <\?(php)?\s+class\s+(\w+)\s*\{static\s+private\s+(\$\w+)\s*=\s*\d+\s*;\s*static\s+function\s+(\w+)\s*
+        \(s*(\$\w+),\s*(\$\w+)\s*\)\s*\{\s*\5\[\d+\]\s*\=\s*count\s*\(\s*\5\s*\)\s+>\s+\d+\s+\?\s+
+
+  136: >
+    @include\s+(['"])\s*(\\x\d+[\/\-\w\.]*\s*)+\1\s*;
+
+skips:
+  - 'd81c8f495a862bcb7e271c9683ac0f28.php'
