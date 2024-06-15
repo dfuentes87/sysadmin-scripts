@@ -317,7 +317,7 @@ sub declare_file_types {
 #ensure that the customer log can be created and written to
 sub create_cust_log {
     my $log_dir_path = shift;
-    my $log_path     = "$log_dir_path/mt_scan_$logtime.log";
+    my $log_path     = "$log_dir_path/scan_$logtime.log";
     return "" if ( !$cust_log_on );
 
     if ( -e $log_path ) {
@@ -629,7 +629,7 @@ sub generate_configs {
     # a hash to accomodate original model.
     my %sigs;
 
-    my $confile = LoadFile('/opt/mt/etc/dirty_find_configs.yml');
+    my $confile = LoadFile('./dirty_find_configs.yml');
 
     my %matches = %{ $confile->{'matches'} };
 

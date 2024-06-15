@@ -1,7 +1,5 @@
 #!/bin/bash
-#FileName: MySQLOptimization.sh
-#NiceFileName: MySQL Optimization
-#FileDescription: This script helps agents perform MySQL Optimizations
+
 ## MySQL Pre Optimization Script
 #This script uses various online, open source tools and resources to get a good look
 #At MySQL and how it's performing, as well as what can be done to improve it.
@@ -31,54 +29,44 @@ function awkmath2() {
   awk "BEGIN { printf \"%.2f\", $@ }"
 }
 
-#echo Precision2: $( awkmath2 "( my * math) / here + nstuffs" ) == 0.00
-#echo Precision0: $( awkmath0 "( my * math) / here + nstuffs" ) == 0
-
-
-## Function to output human readable sizes stolen from stackexchange (such pretty)
+## Function to output human readable sizes (from stackexchange)
 function bytesToHuman() {
     b=${1:-0}; d=''; s=0; S=(Bytes {K,M,G,T,P,E,Y,Z}iB)
     while ((b > 1024)); do
         d="$(printf ".%02d" $((b % 1024 * 100 / 1024)))"
         b=$((b / 1024))
-        let s++
+        (( s++ ))
     done
     echo "$b$d ${S[$s]}"
 }
 
 #Define Constants
 function define_constants {
-	osversion=$(cat /etc/system-release-cpe | awk -F':' '{print $5}')
 	mysqlBin=$(which mysql) #Gives the location of mysql
-	mysqlversion=$($mysqlBin --version|awk '{ print $5 }'|awk -F\, '{ print $1 }'|cut -d"." -f 1,2) #first two decimals of the version
 	epoch=$(date +%s) #Gives the date for use in generating files
 	mysqlSyntax=$($mysqlBin --help --verbose &>/dev/null | grep -i 'error') #Command to check for errors in mysql syntax
-	reportFile="/root/CloudTech/logs/mysql_tuning-${epoch}" #Location of reporting file for the whole script
+	reportFile="/root/logs/mysql_tuning-${epoch}" #Location of reporting file for the whole script
 	disk_avail=$(df -B 1024 | head -2 | tail -1 | awk '{print $4}') # Available disk space in KB
-	host_type='' #Either GoDaddy or MT
 	panel_type='' #Cpanel, Plesk, or none
-	serviceBin=$(which service)
 	my_cnf="/etc/my.cnf"
 }
 
 ### Gathering system details
 function system_details {
-	totalMem=$(free -b|egrep "^Mem"|awk '{print $2}')
-	freeMem=$(( $(cat /proc/meminfo |egrep "^MemFree:"|egrep -o "[0-9]*") * 1024 ))
-	cachedMem=$(( $(cat /proc/meminfo |egrep "^Cached:"|egrep -o "[0-9]*") * 1024 ))
+	totalMem=$(free -b|grep -E "^Mem"|awk '{print $2}')
+	freeMem=$(( $(grep -E "^MemFree:" /proc/meminfo | grep -E -o "[0-9]*") * 1024 ))
+	cachedMem=$(( $(grep -E "^Cached:" /proc/meminfo | grep -E -o "[0-9]*") * 1024 ))
 	cachedMem75=$( decPercent $cachedMem 25 ) # 75% of the total cached memory (so we do not consume all of it)
 	freePlusCached=$(( $freeMem + $cachedMem75 )) # free memory plus 75% of the cached memory
 	innodb_tables_existing=$( sql_connect " -Bse \"select COUNT(ENGINE) FROM information_schema.TABLES WHERE TABLE_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql') AND ENGINE='InnoDB' GROUP BY ENGINE ORDER BY ENGINE ASC;\" " )
 	innodb_total_size=$( sql_connect " -Bse \"SELECT SUM(DATA_LENGTH+INDEX_LENGTH) FROM information_schema.TABLES WHERE TABLE_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql') AND ENGINE='InnoDB' GROUP BY ENGINE ORDER BY ENGINE ASC;\" " )
 	table_count=$( sql_connect " -Bse \"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql') AND ENGINE IS NOT NULL ;\" " )
 	frag_tables=$( sql_connect " -Bse \"SELECT CONCAT(CONCAT(TABLE_SCHEMA, '.'), TABLE_NAME) FROM information_schema.TABLES WHERE TABLE_SCHEMA NOT IN ('information_schema','performance_schema', 'mysql') AND Data_free > 0 AND NOT ENGINE='MEMORY'\" " )
-	frag_tables_count=$(echo $frag_tables | wc -w)
-  if [[ -f /proc/user_beancounters ]]
-  then
-    ramCount=`awk 'match($0,/vmguar/) {print $4}' /proc/user_beancounters`
+	frag_tables_count=$(echo "$frag_tables" | wc -w)
+  if [[ -f /proc/user_beancounters ]]; then
+    ramCount=$(awk 'match($0,/vmguar/) {print $4}' /proc/user_beancounters)
     ramBase=-16 && for ((;ramCount>1;ramBase++)); do ramCount=$((ramCount/2)); done
-  elif [[ -f $(which dmidecode) ]]
-  then
+  elif [[ -f $(which dmidecode) ]]; then
     ramBase=$(( $(dmidecode --type 17 | awk 'match($0,/Size:/) {print $2}') / 1024 ))
   else
     outputHandler "${RedF}${BoldOn}Neither '/proc/user_beancounters' nor 'dmidecode' exists on this server.${Reset}"
@@ -86,7 +74,6 @@ function system_details {
   fi
 
 }
-
 ### End system details
 
 
@@ -102,18 +89,6 @@ do
   _headless=true
   ;;
 
-  -a|--platform)
-  if [[ $2 =~ (gd|mt) ]]
-  then
-    platform=$2
-  else
-    echo "Missing arguement for $1 ('gd' or 'mt' required)"
-    exit 2
-  fi
-
-  platform=$2
-  ;;
-
   -p|--pretune)
   pretune=true
   ;;
@@ -125,7 +100,6 @@ do
   -h|--help|*)
   echo "-h or --help for help"
   echo "-z or --headless for headless mode"
-  echo "-a [gd|mt] or --platform [gd|mt] to set the platform"
   echo "-p or --pretune to run the pretune automation (headless only currently)"
   echo "-r or --recheck to run all subsequent tuning automation (headless only currently)"
   exit 2
@@ -150,8 +124,7 @@ then
 fi
 
 # Define Text Colors
-if [[ $_headless == true ]]
-then
+if [[ $_headless == true ]]; then
   Escape=""
   BlackF=""
   RedB=""
@@ -171,13 +144,6 @@ else
   BoldOff="${Escape}[22m"
 fi
 divider="###################################################################################"
-
-if [[ $platform == "gd" ]]
-then
-  co_name="GoDaddy"
-else
-  co_name="(mt) Media Temple"
-fi
 
 function sql_connect() {
 sql_query=$@
@@ -224,13 +190,11 @@ myvars=()
 while IFS=$'\n' read line
 do
   myvars+=("$line")
-  #myvars[1] = "mysqlOption = 1"
 done < <( sql_connect " -Bse 'SHOW /*!50000 GLOBAL */ VARIABLES' " )
 
 for i in "${myvars[@]}"
 do
   myvar[$(echo $i|awk '{print $1}')]=$(echo $i|awk '{print $2}')
-  #myvar[mysqlOption]=1 --- which is read as ${myvar[mysqlOption]}
 done
 ###### End mysql variables array
 }
@@ -243,13 +207,11 @@ mystats=()
 while IFS=$'\n' read line
 do
   mystats+=("$line")
-  #mystats[1] = "mysqlOption = 1"
 done < <( sql_connect " -Bse 'SHOW /*!50000 GLOBAL */ STATUS' " )
 
 for i in "${mystats[@]}"
 do
-  mystat[$(echo $i|awk '{print $1}')]=$(echo $i|awk '{print $2}')
-  #mystat[mysqlOption]=1 --- which is read as ${mystat[mysqlOption]}
+  mystat[$(echo $i|awk '{print $1}')]=$(echo "$i"|awk '{print $2}')
 
 done
 ###### End mysql status array
@@ -273,64 +235,56 @@ function get_pf_memory() {
 
 ######
 function calc_innodb_buffer_pool_changes() {
-        if [[ $innodb_tables_existing -gt 0 ]]
-        then
-                new_innodb_buffer_pool_size=$( incPercent $innodb_total_size 10 )
-                echo "innodb_buffer_pool_size = $new_innodb_buffer_pool_size "
+  if [[ $innodb_tables_existing -gt 0 ]]
+  then
+          new_innodb_buffer_pool_size=$( incPercent $innodb_total_size 10 )
+          echo "innodb_buffer_pool_size = $new_innodb_buffer_pool_size "
 
-                if [[ $new_innodb_buffer_pool_size -gt 1073741824 ]]
-                then
-                        new_innodb_buffer_pool_instances=$( bytesToHuman $new_innodb_buffer_pool_size | cut -f1 -d. )
-                        echo "innodb_buffer_pool_instances = $new_innodb_buffer_pool_instances"
-                fi
-        fi
+          if [[ $new_innodb_buffer_pool_size -gt 1073741824 ]]
+          then
+                  new_innodb_buffer_pool_instances=$( bytesToHuman $new_innodb_buffer_pool_size | cut -f1 -d. )
+                  echo "innodb_buffer_pool_instances = $new_innodb_buffer_pool_instances"
+          fi
+  fi
 }
 
 function calc_values {
-################### Begin SNA vars
+  ## Check connection percentages
+  pct_connections_used=$( awkmath0 "(${mystat[Max_used_connections]} / ${myvar[max_connections]}) * 100" )
+  pct_connections_aborted=$( awkmath0 "(${mystat[Aborted_connects]} / ${mystat[Connections]}) * 100" )
 
-## Check connection percentages
-pct_connections_used=$( awkmath0 "(${mystat[Max_used_connections]} / ${myvar[max_connections]}) * 100" )
-pct_connections_aborted=$( awkmath0 "(${mystat[Aborted_connects]} / ${mystat[Connections]}) * 100" )
+  ## Check open files and limits
+  open_file_pct=$( awkmath0 "(${mystat[Open_files]} / ${myvar[open_files_limit]}) * 100" )
 
-## Check open files and limits
-open_file_pct=$( awkmath0 "(${mystat[Open_files]} / ${myvar[open_files_limit]}) * 100" )
+  ## Set calculated vars based on myvar[s]
+  per_thread_buffers=$( awkmath0 "${myvar[read_buffer_size]} + ${myvar[read_rnd_buffer_size]} + ${myvar[sort_buffer_size]} + ${myvar[thread_stack]} + ${myvar[join_buffer_size]}" )
+  total_per_thread_buffers=$( awkmath0 "$per_thread_buffers * ${myvar[max_connections]}" )
+  max_total_per_thread_buffers=$( awkmath0 "$per_thread_buffers * ${mystat[Max_used_connections]}" )
 
-## Set calculated vars based on myvar[s]
-per_thread_buffers=$( awkmath0 "${myvar[read_buffer_size]} + ${myvar[read_rnd_buffer_size]} + ${myvar[sort_buffer_size]} + ${myvar[thread_stack]} + ${myvar[join_buffer_size]}" )
-total_per_thread_buffers=$( awkmath0 "$per_thread_buffers * ${myvar[max_connections]}" )
-max_total_per_thread_buffers=$( awkmath0 "$per_thread_buffers * ${mystat[Max_used_connections]}" )
+  ## Find largest value of tmp_table_size or max_heap_table_size and save for later
+  max_tmp_table_size=$( [[ ${myvar[tmp_table_size]} -gt ${myvar[max_heap_table_size]} ]] && echo ${myvar[max_heap_table_size]} || echo ${myvar[tmp_table_size]} )
 
-## Find largest value of tmp_table_size or max_heap_table_size and save for later
-max_tmp_table_size=$( [[ ${myvar[tmp_table_size]} -gt ${myvar[max_heap_table_size]} ]] && echo ${myvar[max_heap_table_size]} || echo ${myvar[tmp_table_size]} )
+  ## Add all of the different types of buffers
+  server_buffers=$( awkmath0 "${myvar[key_buffer_size]} + $max_tmp_table_size + ${myvar[innodb_buffer_pool_size]} + ${myvar[innodb_additional_mem_pool_size]} + ${myvar[innodb_log_buffer_size]} + ${myvar[query_cache_size]} + ${myvar[query_cache_size]}" )
+  max_used_memory=$( awkmath0 "$server_buffers + $max_total_per_thread_buffers + $(get_pf_memory)" )
+  pct_max_used_memory=$( awkmath0 "($max_used_memory / $totalMem) * 100" )
+  max_peak_memory=$( awkmath0 "$server_buffers + $total_per_thread_buffers + $(get_pf_memory)" )
+  pct_max_peak_memory=$( awkmath0 "($max_peak_memory / $totalMem) * 100" )
+  pct_query_cache_used=$( 
+    if [[ "${myvar[query_cache_size]}" -eq 0 ]]
+    then
+      echo 0
+    else
+      awkmath0 "(${mystat[Qcache_free_memory]} / ${myvar[query_cache_size]}) * 100" 
+    fi
+    )
+  ## Mysql versioning checks
+  myMajor=$(echo "${myvar[version]}" | cut -f1 -d.)
+  myMinor=$(echo "${myvar[version]}" | cut -f2 -d.)
+  myUpDays=$( awkmath2 "${mystat[Uptime]} / 86400" )
 
-## Add all of the different types of buffers
-server_buffers=$( awkmath0 "${myvar[key_buffer_size]} + $max_tmp_table_size + ${myvar[innodb_buffer_pool_size]} + ${myvar[innodb_additional_mem_pool_size]} + ${myvar[innodb_log_buffer_size]} + ${myvar[query_cache_size]} + ${myvar[query_cache_size]}" )
-max_used_memory=$( awkmath0 "$server_buffers + $max_total_per_thread_buffers + $(get_pf_memory)" )
-pct_max_used_memory=$( awkmath0 "($max_used_memory / $totalMem) * 100" )
-max_peak_memory=$( awkmath0 "$server_buffers + $total_per_thread_buffers + $(get_pf_memory)" )
-pct_max_peak_memory=$( awkmath0 "($max_peak_memory / $totalMem) * 100" )
-pct_query_cache_used=$( 
-  if [[ "${myvar[query_cache_size]}" -eq 0 ]]
-  then
-    echo 0
-  else
-    awkmath0 "(${mystat[Qcache_free_memory]} / ${myvar[query_cache_size]}) * 100" 
-  fi
-  )
-## Mysql versioning checks
-myMajor=$(echo ${myvar[version]} | cut -f1 -d.)
-myMinor=$(echo ${myvar[version]} | cut -f2 -d.)
-myUpDays=$( awkmath2 "${mystat[Uptime]} / 86400" )
-##
-
-
-
-table_cache_hit_rate=$( awkmath0 "${mystat[Open_tables]} * 100 / ${mystat[Opened_tables]}" )
-table_cache_increase=$(incPercent ${myvar[table_open_cache]} 10)
-
-
-############### End SNA automation vars
+  table_cache_hit_rate=$( awkmath0 "${mystat[Open_tables]} * 100 / ${mystat[Opened_tables]}" )
+  table_cache_increase=$(incPercent "${myvar[table_open_cache]}" 10)
 }
 
 function pct_tmp_disk() {
@@ -347,17 +301,17 @@ function pct_tmp_disk() {
 #before any other action is taken.
 function initial_setup {
 
-  #Make sure we have the CloudTech dir, and make a log file
-  if [ ! -d "/root/CloudTech/logs" ]
+  #Make sure we have the logs dir
+  if [ ! -d "/root/logs" ]
   then
-    mkdir -p /root/CloudTech/logs 2>/dev/null
+    mkdir -p /root/logs 2>/dev/null
     if [[ $? -ne 0 ]]; then
-      catch_err "Unable to create logdir /root/CloudTech/logs. Exiting."
+      catch_err "Unable to create logdir /root/logs. Exiting."
     fi
   fi
   touch $reportFile
-  exec >  >(tee -a $reportFile)
-  exec 2> >(tee -a $reportFile)
+  exec >  >(tee -a "$reportFile")
+  exec 2> >(tee -a "$reportFile")
 
   #Display existing my.cnf
   outputHandler "${CyanF}${BoldOn}Existing my.cnf file contents${Reset}"
@@ -369,19 +323,18 @@ function initial_setup {
   #Backup config file, ouput process to report file
   outputHandler "${CyanF}${BoldOn}Backing Up MySQL Config File${Reset}"
   outputHandler ""
-  outputHandler "$(cp -vp ${my_cnf}{,-$epoch.ct})"
-  restoreFile="${my_cnf}-$epoch.ct"
+  outputHandler "$(cp -vp ${my_cnf}{,-$epoch.bk})"
+  restoreFile="${my_cnf}-$epoch.bk"
   outputHandler ""
 }
 
 function rollback() {
   _rollback=true
   exitCode=$1
-  serviceBin=$2
-  serviceName=$3
+  serviceName=$2
   mv ${my_cnf}{,_errors_detected}
-  cp -p $restoreFile ${my_cnf}
-  $serviceBin $serviceName restart &> /dev/null
+  cp -p "$restoreFile" ${my_cnf}
+  systemctl restart "$serviceName" &> /dev/null
   if [[ $? -ne 0 ]]
   then
     outputHandler "Rollback complete and MySQL restarted successfully."
@@ -423,7 +376,7 @@ function check_user {
   fi
 }
 
-#See if this is CPanel Or Plesk, and change the panel_type #al string accordingly.
+#See if this is CPanel Or Plesk, and change the panel_type string accordingly.
 #This function also automatically sets up the database connections based on the panel type,
 #or prompts for manual setup if it can't detect either CPanel or Plesk.
 function check_panel {
@@ -445,7 +398,7 @@ function check_panel {
   #Set up database conections based on detected panel
   if [ "$panel_type" == 'plesk' ]
   then
-    sqlConnect="$mysqlBin -A -u admin -p`cat /etc/psa/.psa.shadow`"
+    sqlConnect="$mysqlBin -A -u admin -p$(cat /etc/psa/.psa.shadow)"
     db_pass=$(cat /etc/psa/.psa.shadow)
     sql_dump_string="mysqldump -uadmin -p${db_pass} --add-drop-table --hex-blob"
     sql_check_string="mysqlcheck -uadmin -p${db_pass}"
@@ -466,7 +419,7 @@ function check_panel {
     outputHandler "Could not find control panel. You must enter the admin credentials for MySQL:"
     outputHandler ""
     outputHandler "Enter MySQL admin user: "
-    read sql_user
+    read -r sql_user
     outputHandler "Enter MySQL admin pass: "
     read sql_pass
     sqlConnect="$mysqlBin -A -u${sql_user} -p${sql_pass}"
@@ -477,7 +430,7 @@ function check_panel {
 
 
 #The below function is my main target for more encapsulation, it's a bit of a mess right now
-#Run they typical pre-tune:
+#Run the typical pre-tune:
 #1. Check Mysql Syntax
 #2. Check disk space for database backups and backup databases
 #3. Optimize databases and check saved space
@@ -509,12 +462,12 @@ function pre_tune {
   #Backup Databases
 
   #See If Otto Directory Exists. If so, back up the DB's in there
-  mkdir -p /root/CloudTech/db-backups
-  outputHandler "${CyanF}${BoldOn}Backing Up All Databases To /root/CloudTech/db-backups${Reset}"
+  mkdir -p /root/db-backups
+  outputHandler "${CyanF}${BoldOn}Backing Up All Databases To /root/db-backups${Reset}"
   outputHandler ""
-  for i in $( sql_connect " -Nse 'show databases' | egrep -v '^information_schema$|^performance_schema$' " )
+  for i in $( sql_connect " -Nse 'show databases' | grep -E -v '^information_schema$|^performance_schema$' " )
   do
-    $(echo $sql_dump_string) "$i" 2>/dev/null | gzip > /root/CloudTech/db-backups/$i-$epoch.sql.gz
+    $(echo $sql_dump_string) "$i" 2>/dev/null | gzip > /root/db-backups/"$i"-"$epoch".sql.gz
     if [[ $? -ne 0 ]]
     then
       catch_err "Could not backup $i"
@@ -527,23 +480,23 @@ function pre_tune {
   outputHandler "${CyanF}${BoldOn}Repairing And Optimizing Databases${Reset}"
   if [[ $_headless == true ]]
   then
-    $sql_check_string --auto-repair --optimize --all-databases &> $reportFile
+    $sql_check_string --auto-repair --optimize --all-databases &> "$reportFile"
   else
     outputHandler "This may take a while..."
     outputHandler ""
-    $sql_check_string --auto-repair --optimize --all-databases | tee -a $reportFile
+    $sql_check_string --auto-repair --optimize --all-databases | tee -a "$reportFile"
   fi
   outputHandler "${CyanF}${BoldOn}Optimization Complete - Results in $reportFile ${Reset}"
 
   #Get Post_Optimization Size Of All DB's
   postSize=$( sql_connect " -Nse 'select Round(((Sum(DATA_LENGTH) + SUM(INDEX_LENGTH)) / 1024),0) from information_schema.tables;' " )
-  sizeDiff=$(($preSize - $postSize))
+  sizeDiff=$((preSize - postSize))
 
 
   if [[ $_headless != true ]]
   then
     #Enable slow query logging if there's not already a slow query log file
-    slowLogFile=$(cat ${my_cnf} | egrep 'log_slow_queries|slow_query_log_file' | awk 'BEGIN { FS = "=" } ; { print $2 }' )
+    slowLogFile=$(grep -E 'log_slow_queries|slow_query_log_file' ${my_cnf} | awk 'BEGIN { FS = "=" } ; { print $2 }' )
     if [ "$slowLogFile" == "" ]
     then
       outputHandler ""
@@ -561,8 +514,6 @@ function pre_tune {
 
 }
 
-#Generate making it better suggestions https://mediatemple.net/community/products/dv/204404044/making-it-better:-basic-mysql-performance-tuning-#dv
-#Originally this applied the suggestions, but I figure this way is better, so you don't risk losing settings
 function make_it_better {
   outputHandler "\033[31mCopy the below recommendations:\e[0m"
   outputHandler ""
@@ -587,7 +538,7 @@ function make_it_better {
   outputHandler "innodb_thread_concurrency = $((2**$ramBase))"
   outputHandler ""
   outputHandler "\033[31mPress enter when you're done\e[0m"
-  read enterKey
+  read -r
 }
 
 ## Headless version of make_it_better
@@ -668,17 +619,17 @@ function autotuner {
 }
 
 #Installs MySQLTuner
-#based on panel, runs MySQLTuner and outputs the results to the /root/CloudTech directory
+#based on panel, runs MySQLTuner and outputs the results to the /root/ directory
 #removes the script, cats the results to the screen
 function mysql_tuner {
   outputHandler "Running MySQL Tuner..."
   #Using an older version of mysqltuner because the new version requires something we don't want to install
   if [ "$panel_type" == 'plesk' ] || [ "$panel_type" == 'cpanel' ]
   then
-    mkdir -p /root/CloudTech
-    wget --no-check-certificate -O /root/CloudTech/mysqltuner.pl https://raw.githubusercontent.com/major/MySQLTuner-perl/d220a9ac7972af19d0eda3d80721f9673e11243f/mysqltuner.pl && perl /root/CloudTech/mysqltuner.pl > /root/CloudTech/mysql_tuner_$epoch
-    rm -rf /root/CloudTech/mysqltuner.pl
-    cat /root/CloudTech/mysql_tuner_$epoch
+    mkdir -p /root/
+    wget --no-check-certificate -O /root/mysqltuner.pl https://raw.githubusercontent.com/major/MySQLTuner-perl/d220a9ac7972af19d0eda3d80721f9673e11243f/mysqltuner.pl && perl /root/mysqltuner.pl > /root/mysql_tuner_"$epoch"
+    rm -rf /root/mysqltuner.pl
+    cat /root/mysql_tuner_"$epoch"
     outputHandler
 
     if [[ $_headless == true ]]
@@ -686,7 +637,7 @@ function mysql_tuner {
       outputHandler ""
     else
       outputHandler "Take note of the MySQL Tuner results above and press enter."
-      read enterKey
+      read -r
     fi
 
   #We don't want to attempt he automated version if we're not sure what panel they're using.
@@ -696,55 +647,55 @@ function mysql_tuner {
 }
 
 #Installs MySQLReport and a dependency if the panel is cpanel
-#based on panel, runs MySQLReport and outputs the results to the /root/CloudTech directory
+#based on panel, runs MySQLReport and outputs the results to the /root/ directory
 #removes the script, cats the results to the screen
 function mysql_report {
   outputHandler "Running MySQL Report..."
   if [ "$panel_type" == 'plesk' ]
   then
-    wget --no-check-certificate -O /usr/local/src/mysqlreport https://raw.githubusercontent.com/daniel-nichter/hackmysql.com/master/mysqlreport/mysqlreport && perl /usr/local/src/mysqlreport --user admin --password `cat /etc/psa/.psa.shadow` > /root/CloudTech/mysql_report_$epoch
-    rm -rf /root/CloudTech/mysqlreport
-    cat /root/CloudTech/mysql_report_$epoch
+    wget --no-check-certificate -O /usr/local/src/mysqlreport https://raw.githubusercontent.com/daniel-nichter/hackmysql.com/master/mysqlreport/mysqlreport && perl /usr/local/src/mysqlreport --user admin --password "$(cat /etc/psa/.psa.shadow)" > /root/mysql_report_"$epoch"
+    rm -rf /root/mysqlreport
+    cat /root/mysql_report_"$epoch"
     outputHandler
     if [[ $_headless == true ]]
     then
       outputHandler ""
     else
       outputHandler "Take note of the MySQL Report results above and press enter."
-      read enterKey
+      read -r
     fi
   elif [ "$panel_type" == 'cpanel' ]
   then
     #We need a cpanel module for this:
     cpan DBD::mysql
 
-    wget --no-check-certificate -O /usr/local/src/mysqlreport https://raw.githubusercontent.com/daniel-nichter/hackmysql.com/master/mysqlreport/mysqlreport && perl /usr/local/src/mysqlreport --user root --password `grep password /root/.my.cnf | awk -F\" '{print $2}'` > /root/CloudTech/mysql_report_$epoch
-    rm -rf /root/CloudTech/mysqlreport
-    cat /root/CloudTech/mysql_report_$epoch
+    wget --no-check-certificate -O /usr/local/src/mysqlreport https://raw.githubusercontent.com/daniel-nichter/hackmysql.com/master/mysqlreport/mysqlreport && perl /usr/local/src/mysqlreport --user root --password "$(grep password /root/.my.cnf | awk -F\" '{print $2}')" > /root/mysql_report_"$epoch"
+    rm -rf /root/mysqlreport
+    cat /root/mysql_report_"$epoch"
     outputHandler
     if [[ $_headless == true ]]
     then
       outputHandler ""
     else
     outputHandler "Take note of the MySQL Report results above and press enter."
-      read enterKey
+      read -r
     fi
   else
     outputHandler "Unknown hosting panel, run this manually."
   fi
 }
 
-#Runs MySQLPrimer and outputs the results to the /root/CloudTech directory
+#Runs MySQLPrimer and outputs the results to the /root/ directory
 #Removes the script, then cats the results to the screen.
 function mysql_primer {
   outputHandler "Running MySQL Primer..."
-  wget -O /usr/local/src/tuning-primer.sh https://launchpad.net/mysql-tuning-primer/trunk/1.6-r1/+download/tuning-primer.sh && bash /usr/local/src/tuning-primer.sh > /root/CloudTech/mysql_primer_$epoch
+  wget -O /usr/local/src/tuning-primer.sh https://launchpad.net/mysql-tuning-primer/trunk/1.6-r1/+download/tuning-primer.sh && bash /usr/local/src/tuning-primer.sh > /root/mysql_primer_"$epoch"
   rm -f /usr/local/src/tuning-primer.sh
-  outputHandler "$(cat /root/CloudTech/mysql_primer_$epoch)"
+  outputHandler "$(cat /root/mysql_primer_$epoch)"
   outputHandler ""
 }
 
-#Restarts mysql based on the panel and version of CentOS
+#Restarts mysql
 function restart_mysql {
   mysql -V | grep -i mariadb > /dev/null
   if [[ $? -eq 0 ]]
@@ -767,13 +718,13 @@ function restart_mysql {
   fi
   outputHandler ""
   outputHandler "${BoldOn}${CyanF}Attempting to restart MySQL.${Reset}"
-  $serviceBin $serviceName restart &> /dev/null
+  systemctl restart "$serviceName" &> /dev/null
   myRestart=$?
 
   if [[ $? -ne 0 ]]
   then
   	outputHandler "${BoldOn}${RedF}Error restarting MySQL. Rolling back configs now.${Reset}"
-    rollback $myRestart $serviceBin $serviceName
+    rollback $myRestart service "$serviceName"
   fi
 
   if [[ $_headless == true ]]
@@ -781,33 +732,21 @@ function restart_mysql {
     outputHandler "MySQL restarted successfully."
   else
     echo "Restart successful, press Enter to continue."
-    read enterKey
+    read -r
   fi
 
 }
 
-#Generate Support Request based on a few things that have been done
-function support_request {
-  outputHandler "${divider}"
-  outputHandler "Printed below is a template for your support request. You still need to do the actual tuning, and customize the support request accordingly!"
-  outputHandler "${divider}"
-  outputHandler ""
-  outputHandler "Thanks for ordering the MySQL Optimization service! We have completed your optimization, have made several changes based upon our findings. Here is what we've done:"
-  outputHandler ""
-  outputHandler "First and foremost, we've backed up all configuration files, and your databases were exported into /root/CloudTech/db-backups. Everything was timestamped if you need to restore one of these databases in the future."
-  outputHandler ""
-  outputHandler "We also repaired and optimized all applicable database tables to clear out the overhead. This is the actual size of a table datafile relative to the ideal size of the same datafile (as if when just restored from backup). For performance reasons, MySQL does not compact the datafiles after it deletes or updates rows. This overhead is bad for table scans. For example, when your query needs to run over all table values, it will need to look at more empty space."
-  outputHandler ""
-  outputHandler ""
-  outputHandler "On the server level, we've also adjusted several parameters, including increases to query_cache_size, tmp_table_size, and max_heap_table_size. Here are the new parameters:"
+#Generate info based on a few things that have been done
+function information {
   outputHandler ""
   outputHandler "BELOW IS JUST ALL OF THE FOUND CHANGES, CLEAN IT UP BEFORE YOU SEND IT OUT:"
   outputHandler ""
-  outputHandler "$(diff ${my_cnf}-$epoch.ct ${my_cnf} | grep '>')"
+  outputHandler "$(diff ${my_cnf}-$epoch.bk ${my_cnf} | grep '>')"
   outputHandler ""
 
   #Finds the slow log file and tells them about it if it exists.  Outputs a warning if it doesn't find it.
-  slowLog=$(cat ${my_cnf} | egrep 'log_slow_queries|slow_query_log_file')
+  slowLog=$(grep -E 'log_slow_queries|slow_query_log_file' ${my_cnf})
   if [ "$slowLog" == "" ]
   then
     outputHandler "SLOW QUERY LOGGING ISN'T ENABLED, IT PROBABLY SHOULD BE"
@@ -821,18 +760,15 @@ function support_request {
     outputHandler "mysqldumpslow -r -a /var/log/mysqld.slow.log"
     outputHandler ""
   fi
-  outputHandler ""
-  outputHandler "If you have any questions or concerns about the MySQL Optimization we've performed or notice any subsequent issues as a result of the work we've done, please reply to this support request, and we would be happy to investigate further. We're confident your MySQL service should be running much better."
-  outputHandler ""
   outputHandler "${divider}"
   if [[ $_headless == true ]]
   then
-    outputHandler "End Support Request"
+    outputHandler "Done."
     outputHandler "${divider}"
   else
-    outputHandler "End Support Request, press Enter to continue"
+    outputHandler "Press Enter to continue"
     outputHandler "${divider}"
-    read enterKey
+    read -r
   fi
 
 }
@@ -860,7 +796,7 @@ function output {
           echo -e "$i"
         done | base64 -w 0
         )\", \"resolution\" : \"$(output_glob=()
-        support_request
+        information
         for i in "${output_glob[@]}"
         do
           echo -e "$i"
@@ -877,7 +813,7 @@ function output {
       fi 
     fi
   else
-    support_request
+    information
   fi
   exit 3
 }
@@ -898,7 +834,7 @@ function main_menu {
   do
     echo
     echo
-    echo -e "\033[31m"${divider}"\e[0m"
+    echo -e "\033[31m""${divider}""\e[0m"
     echo
     echo -e "\033[31mMySQL Optimization Tools\e[0m"
     echo
@@ -909,12 +845,12 @@ function main_menu {
     echo "5) Mysql Primer"
     echo "6) Edit ${my_cnf} with vim"
     echo "7) Restart mysql"
-    echo "8) Generate Support request and exit (do this after you've made all changes)"
+    echo "8) Generate info and exit after you've made all changes"
     echo -e "Q) Exit\e[0m"
     echo
-    echo -e "\033[31m"${divider}"\e[0m"
+    echo -e "\033[31m""${divider}""\e[0m"
     echo
-    read -p "Please select an option to continue: " action
+    read -r -p "Please select an option to continue: " action
     echo
     clear
     case $action in
@@ -940,11 +876,11 @@ function main_menu {
         restart_mysql
       ;;
       8)
-        #support_request
+        information
         exit 0
       ;;
-        *)
-
+      *)
+        exit 1
       ;;
     esac
     clear
@@ -962,7 +898,7 @@ echo "Max MySQL usable memory: $max_peak_memory ($(bytesToHuman $max_peak_memory
 echo "Max MySQL usable memory: $pct_max_peak_memory%"
 echo "Max allowed connections: ${myvar[max_connections]}"
 echo "Max used connections: ${mystat[Max_used_connections]}"
-echo "Connection usage: $pct_connections_used%" $(  [[ $pct_connections_used -gt 85 ]] && echo "WARNING" || echo "(good)" )
+echo "Connection usage: $pct_connections_used%" "$([[ $pct_connections_used -gt 85 ]] && echo "WARNING" || echo "(good)" )"
 echo "Aborted Connections: ${mystat[Aborted_connects]}"
 echo "Connections: ${mystat[Connections]}"
 echo "Percent of connections aborted: $pct_connections_aborted"
@@ -995,7 +931,6 @@ echo "MySQL Major Version: $myMajor"
 echo "Minor Version: $myMinor"
 echo "Fragmented Table count: $frag_tables_count"
 
-
 }
 
 ## Function to automate during headless mode
@@ -1021,7 +956,8 @@ function automate {
     autotuner
   fi
   restart_mysql
-#Uncomment this to have addtl output showing you the values collected from MySQL for debugging purposes
+
+#Uncomment below to have addtl output showing you the values collected from MySQL
 #debug_run
 
   exit 0
@@ -1034,7 +970,6 @@ function FINISH {
   case $exitCode in
     # Exit code 0 = No errors everything worked. Remove script and print output.
     0)
-    rm -f -- "$0"
     output
     ;;
 
@@ -1042,12 +977,6 @@ function FINISH {
     # If headless, remove script, otherwise leave it. Do not print output.
     2)
     output
-    if [[ "$_headless" == true ]]
-    then
-      echo
-      rm -f -- "$0"
-    fi
-    exit
     ;;
 
     # This exits the script after the output function completes. This handles Ctrl+C exits.
@@ -1059,7 +988,6 @@ function FINISH {
     # Exit code 33 = Mysql failed to start after changes, so we rolled back successfully and mysql started again
     # Exit code 66 = Mysql failed to start after changes, *AND* failed to restart after rollback. IMMEDIATE ATTENTION REQUIRED
     *)
-    rm -f -- "$0"
     output
     ;;
 
