@@ -1,8 +1,12 @@
 # SysAdmin Scripts
 
+Some basic, dirty scripts to help in system administration. Good for novice users but shouldn't really be relied on as you advance in your career.
+
+Most of these need to be run using sudo/root.
+
 ## access_logs.sh
 
-A quick way to check the top 5 IPs hitting a domain's access logs. Mainly designed for servers using Plesk or cPanel, but it will try to do it on other types. Must be ran by root or use sudo. -- Written by me (dfuentes87)
+A quick way to check the top 5 IPs hitting a domain's access logs. Mainly designed for servers using Plesk or cPanel, but it will try to do it on other types. -- Written by me (dfuentes87)
 
 ## ConvertFilestoSQL.sh
 
@@ -10,10 +14,6 @@ A quick way to check the top 5 IPs hitting a domain's access logs. Mainly design
 
 ## dirty_find.pl + dirty_find_configs.yml
 Rudimentary scan for malware. -- Written by ???
-
-## MySQLOptimization.sh (WORK IN PROGRESS)
-
-Analyze and tune MySQL/MariaDB.  -- Written by ??? although uses other open source projects
 
 ## pcap.sh
 Quick output of the top domains and IPs of a tcpdump. Run on local machine or NS. -- Written by me (dfuentes87)
@@ -24,6 +24,10 @@ Check Postfix/Qmail for spam. -- Written by ???
 
 ## ps_mem.py
 List of applications that are consuming most of the RAM on the system. -- https://github.com/pixelb/ps_mem
+
+## sar_average.sh
+
+Calculate the average load and memory usage of the past 7 days. Uses sar/sysstat, must be preinstalled. -- Written by me (dfuentes87)
 
 ## TrafficAnalysis.sh
 
